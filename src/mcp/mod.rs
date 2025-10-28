@@ -180,7 +180,8 @@ mod tests {
     async fn test_get_context_placeholder() {
         let config = McpConfig::default();
         let client = McpClient::new(config);
-        let context = client.get_context("test query").await.unwrap();
-        assert!(!context.is_empty());
+        // This should fail since there's no actual MCP server running
+        let result = client.get_context("test query").await;
+        assert!(result.is_err(), "Expected error when no MCP server is available");
     }
 }
