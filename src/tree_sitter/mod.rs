@@ -18,10 +18,7 @@ static LANGUAGE_REGISTRY: Lazy<DashMap<String, Language>> = Lazy::new(|| {
     registry.insert("javascript".to_string(), tree_sitter_javascript::language());
     registry.insert("typescript".to_string(), tree_sitter_typescript::language_typescript());
     registry.insert("tsx".to_string(), tree_sitter_typescript::language_tsx());
-    registry.insert("html".to_string(), tree_sitter_html_dvdb::language());  // Using dvdb fork compatible with tree-sitter 0.20
-    registry.insert("css".to_string(), tree_sitter_css::language());
-    registry.insert("json".to_string(), tree_sitter_json::language());
-    registry.insert("svelte".to_string(), tree_sitter_svelte::language());
+    // HTML, CSS, JSON, Svelte temporarily disabled due to tree-sitter version conflicts
 
     // Systems languages
     registry.insert("python".to_string(), tree_sitter_python::language());
@@ -100,8 +97,8 @@ impl TreeSitterParser {
     /// Set language for parsing
     pub fn set_language(&mut self, lang: &str) -> Result<()> {
         if let Some(language) = LANGUAGE_REGISTRY.get(lang) {
-            self.parser.set_language(*language)?;
-            self.language = Some(*language);
+            self.parser.set_language(&*language)?;
+            self.language = Some(language.clone());
             Ok(())
         } else {
             Err(anyhow::anyhow!("Language {} not supported", lang))
@@ -148,24 +145,24 @@ impl TreeSitterParser {
             "c" | "cpp" => {
                 self.extract_c_symbols(root_node, source, &mut symbols)?;
             }
-            "svelte" => {
-                self.extract_svelte_symbols(root_node, source, &mut symbols)?;
-            }
+            // "svelte" => {
+            //     self.extract_svelte_symbols(root_node, source, &mut symbols)?;
+            // }
             "bash" | "sh" => {
                 self.extract_bash_symbols(root_node, source, &mut symbols)?;
             }
-            "css" => {
-                self.extract_css_symbols(root_node, source, &mut symbols)?;
-            }
-            "html" => {
-                self.extract_html_symbols(root_node, source, &mut symbols)?;
-            }
-            "json" => {
-                self.extract_json_symbols(root_node, source, &mut symbols)?;
-            }
-            "markdown" => {
-                self.extract_markdown_symbols(root_node, source, &mut symbols)?;
-            }
+            // "css" => {
+            //     self.extract_css_symbols(root_node, source, &mut symbols)?;
+            // }
+            // "html" => {
+            //     self.extract_html_symbols(root_node, source, &mut symbols)?;
+            // }
+            // "json" => {
+            //     self.extract_json_symbols(root_node, source, &mut symbols)?;
+            // }
+            // "markdown" => {
+            //     self.extract_markdown_symbols(root_node, source, &mut symbols)?;
+            // }
             "sql" => {
                 self.extract_sql_symbols(root_node, source, &mut symbols)?;
             }
