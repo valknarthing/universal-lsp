@@ -522,10 +522,11 @@ async fn test_proxy_environment_isolation() {
 #[tokio::test]
 async fn test_lsp_content_length_edge_cases() {
     // Test with exact boundaries
+    let large_content = "x".repeat(100);
     let test_cases = vec![
         (1, "{}"),
         (10, r#"{"key":1}"#),
-        (100, &"x".repeat(100)),
+        (100, large_content.as_str()),
     ];
 
     for (expected_len, content) in test_cases {

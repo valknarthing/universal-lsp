@@ -8,6 +8,10 @@ license = "MIT"
 repository = "https://github.com/valknarthing/universal-lsp"
 readme = "README.md"
 
+[lib]
+name = "universal_lsp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "universal-lsp"
 path = "src/main.rs"
