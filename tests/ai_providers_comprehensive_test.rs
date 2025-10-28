@@ -417,12 +417,21 @@ fn test_completion_context_edge_cases() {
 
 #[test]
 fn test_claude_client_creation() {
-    let config = ClaudeConfig::default();
+    // Test with empty API key (should fail)
+    let config_empty = ClaudeConfig::default();
+    let client_empty = ClaudeClient::new(config_empty);
+    assert!(client_empty.is_err(), "Should fail with empty API key");
 
-    // Note: This creates an HTTP client but doesn't make actual API calls
-    // Actual API calls should be tested with mocks in integration tests
-    let client = ClaudeClient::new(config.clone());
-    assert!(client.is_ok(), "Failed to create Claude client");
+    // Test with valid API key format
+    let config_valid = ClaudeConfig {
+        api_key: "test-api-key".to_string(),
+        model: "claude-sonnet-4-20250514".to_string(),
+        max_tokens: 1024,
+        temperature: 0.3,
+        timeout_ms: 10000,
+    };
+    let client_valid = ClaudeClient::new(config_valid);
+    assert!(client_valid.is_ok(), "Should succeed with valid API key");
 }
 
 #[test]
