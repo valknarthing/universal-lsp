@@ -24,7 +24,7 @@ mod text_sync;
 mod tree_sitter;
 mod workspace;
 
-use ai::{ClaudeClient, ClaudeConfig, CompletionContext};
+use ai::{ClaudeClient, ClaudeConfig, CopilotClient, CopilotConfig, CompletionContext};
 use code_actions::CodeActionProvider;
 use config::Config;
 use diagnostics::DiagnosticProvider;
@@ -44,6 +44,7 @@ struct UniversalLsp {
     pipeline: Option<Arc<McpPipeline>>,
     proxy_manager: Option<Arc<ProxyManager>>,
     claude_client: Option<Arc<ClaudeClient>>,
+    copilot_client: Option<Arc<CopilotClient>>,
     parser: Arc<dashmap::DashMap<String, TreeSitterParser>>,
     documents: Arc<dashmap::DashMap<String, String>>,
     diagnostic_provider: Arc<DiagnosticProvider>,
@@ -96,12 +97,30 @@ impl UniversalLsp {
             None
         };
 
+        // Create Copilot client if API key is available
+        let copilot_client = if let Ok(api_key) = std::env::var("GITHUB_TOKEN") {
+            let copilot_config = CopilotConfig {
+                api_key,
+                ..Default::default()
+            };
+            match CopilotClient::new(copilot_config) {
+                Ok(client) => Some(Arc::new(client)),
+                Err(e) => {
+                    tracing::warn!("Failed to initialize Copilot client: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             client,
             config: Arc::new(config),
             pipeline,
             proxy_manager,
             claude_client,
+            copilot_client,
             parser: Arc::new(dashmap::DashMap::new()),
             documents: Arc::new(dashmap::DashMap::new()),
             diagnostic_provider: Arc::new(DiagnosticProvider::new()),
@@ -287,13 +306,53 @@ impl LanguageServer for UniversalLsp {
                                 kind: Some(CompletionItemKind::TEXT),
                                 detail: suggestion.detail.or(Some("Claude AI".to_string())),
                                 insert_text: Some(suggestion.text),
-                                sort_text: Some(format!("0_{}", suggestion.confidence)), // Higher priority
+                                sort_text: Some(format!("0_claude_{}", suggestion.confidence)), // Highest priority
                                 ..Default::default()
                             });
                         }
                     }
                     Err(e) => {
                         tracing::debug!("Claude completion failed: {}", e);
+                    }
+                }
+            }
+        }
+
+        // Try AI-powered completions from GitHub Copilot
+        if let Some(copilot_client) = &self.copilot_client {
+            if let Some(content) = self.documents.get(uri.as_str()) {
+                // Extract prefix (code before cursor) and suffix (code after cursor)
+                let byte_offset = position_to_byte(&content, position);
+                let prefix = content[..byte_offset].to_string();
+                let suffix = if byte_offset < content.len() {
+                    Some(content[byte_offset..].to_string())
+                } else {
+                    None
+                };
+
+                let completion_context = CompletionContext {
+                    language: lang.to_string(),
+                    file_path: uri.path().to_string(),
+                    prefix,
+                    suffix,
+                    context: None,
+                };
+
+                match copilot_client.get_completions(&completion_context).await {
+                    Ok(suggestions) => {
+                        for suggestion in suggestions {
+                            items.push(CompletionItem {
+                                label: suggestion.text.clone(),
+                                kind: Some(CompletionItemKind::TEXT),
+                                detail: suggestion.detail.or(Some("GitHub Copilot".to_string())),
+                                insert_text: Some(suggestion.text),
+                                sort_text: Some(format!("0_copilot_{}", suggestion.confidence)), // Highest priority
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Copilot completion failed: {}", e);
                     }
                 }
             }

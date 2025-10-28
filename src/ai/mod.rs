@@ -4,5 +4,11 @@
 //! code completion, hover information, and other AI-enhanced features.
 
 pub mod claude;
+pub mod copilot;
 
-pub use claude::{ClaudeClient, ClaudeConfig, CompletionContext, CompletionSuggestion};
+// Re-export provider-specific types
+pub use claude::{ClaudeClient, ClaudeConfig};
+pub use copilot::{CopilotClient, CopilotConfig};
+
+// Shared types (from claude module, but used by both providers)
+pub use claude::{CompletionContext, CompletionSuggestion};
