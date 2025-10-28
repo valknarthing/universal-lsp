@@ -156,8 +156,32 @@ impl LanguageServer for UniversalLsp {
         let position = params.text_document_position_params.position;
         let lang = detect_language(uri.path());
 
+        let mut hover_text = format!("Language: {}", lang);
+
+        // Try tree-sitter symbol extraction at cursor position
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            if let Ok(mut parser) = TreeSitterParser::new() {
+                if parser.set_language(lang).is_ok() {
+                    if let Ok(tree) = parser.parse(&content, uri.as_str()) {
+                        // Find node at position
+                        let byte_offset = position_to_byte(&content, position);
+                        if let Some(node) = tree.root_node().descendant_for_byte_range(byte_offset, byte_offset) {
+                            // Get symbol info
+                            let node_text = &content[node.byte_range()];
+                            let kind = node.kind();
+
+                            hover_text = format!(
+                                "{}\n\nSymbol: {}\nType: {}\nPosition: {}:{}",
+                                hover_text, node_text, kind,
+                                position.line, position.character
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // Try MCP pre-processing if available
-        let mut hover_text = format!("Language: {}\n\nUniversal LSP Server", lang);
 
         if let Some(pipeline) = &self.pipeline {
             if pipeline.has_pre_processing() {
@@ -213,6 +237,35 @@ impl LanguageServer for UniversalLsp {
                 ..Default::default()
             },
         ];
+
+        // Try tree-sitter symbol-based completions
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            if let Ok(mut parser) = TreeSitterParser::new() {
+                if parser.set_language(lang).is_ok() {
+                    if let Ok(tree) = parser.parse(&content, uri.as_str()) {
+                        if let Ok(symbols) = parser.extract_symbols(&tree, &content, lang) {
+                            // Add symbols as completion items
+                            for symbol in symbols {
+                                let completion_kind = match symbol.kind {
+                                    SymbolKind::FUNCTION | SymbolKind::METHOD => CompletionItemKind::FUNCTION,
+                                    SymbolKind::CLASS => CompletionItemKind::CLASS,
+                                    SymbolKind::VARIABLE => CompletionItemKind::VARIABLE,
+                                    SymbolKind::CONSTANT => CompletionItemKind::CONSTANT,
+                                    _ => CompletionItemKind::TEXT,
+                                };
+
+                                items.push(CompletionItem {
+                                    label: symbol.name.clone(),
+                                    kind: Some(completion_kind),
+                                    detail: symbol.detail.or(Some(format!("{:?}", symbol.kind))),
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // MCP pre-processing
         if let Some(pipeline) = &self.pipeline {
@@ -341,6 +394,48 @@ impl LanguageServer for UniversalLsp {
         Ok(None)
     }
 
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let uri = &params.text_document.uri;
+        let lang = detect_language(uri.path());
+
+        // Try to get document content
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            // Try tree-sitter based symbol extraction
+            let Ok(mut parser) = TreeSitterParser::new() else {
+                return Ok(None);
+            };
+            if parser.set_language(lang).is_ok() {
+                if let Ok(tree) = parser.parse(&content, uri.as_str()) {
+                    if let Ok(symbols) = parser.extract_symbols(&tree, &content, lang) {
+                        // Convert to LSP DocumentSymbol format
+                        let doc_symbols: Vec<DocumentSymbol> = symbols
+                            .into_iter()
+                            .map(|s| DocumentSymbol {
+                                name: s.name,
+                                detail: s.detail,
+                                kind: s.kind,
+                                range: s.range,
+                                selection_range: s.selection_range,
+                                children: None,
+                                tags: None,
+                                deprecated: None,
+                            })
+                            .collect();
+
+                        if !doc_symbols.is_empty() {
+                            return Ok(Some(DocumentSymbolResponse::Nested(doc_symbols)));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
         let content = params.text_document.text.clone();
@@ -444,6 +539,27 @@ impl LanguageServer for UniversalLsp {
             Ok(None)
         }
     }
+}
+
+/// Helper function to convert LSP position to byte offset
+fn position_to_byte(source: &str, position: Position) -> usize {
+    let mut byte_offset = 0;
+    let mut current_line = 0;
+    let mut current_char = 0;
+
+    for ch in source.chars() {
+        if current_line == position.line && current_char == position.character {
+            break;
+        }
+        byte_offset += ch.len_utf8();
+        current_char += 1;
+        if ch == '\n' {
+            current_line += 1;
+            current_char = 0;
+        }
+    }
+
+    byte_offset
 }
 
 #[tokio::main]
