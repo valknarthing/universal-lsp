@@ -49,6 +49,7 @@ tree-sitter-go = "0.20"
 tree-sitter-python = "0.20"
 tree-sitter-ruby = "0.20"
 tree-sitter-php = "0.20"
+tree-sitter-bash = { git = "https://github.com/tree-sitter/tree-sitter-bash", tag = "v0.20.5" }
 
 # JVM languages
 tree-sitter-java = "0.20"

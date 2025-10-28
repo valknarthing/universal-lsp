@@ -33,9 +33,9 @@ static LANGUAGE_REGISTRY: Lazy<DashMap<String, Language>> = Lazy::new(|| {
     registry.insert("c".to_string(), tree_sitter_c::language());
     registry.insert("cpp".to_string(), tree_sitter_cpp::language());
 
-    // Shell & scripts - REMOVED: Bash requires tree-sitter 0.21, incompatible with 0.20.10
-    // registry.insert("bash".to_string(), tree_sitter_bash::language());
-    // registry.insert("sh".to_string(), tree_sitter_bash::language());  // Alias for bash
+    // Shell & scripts
+    registry.insert("bash".to_string(), tree_sitter_bash::language());
+    registry.insert("sh".to_string(), tree_sitter_bash::language());  // Alias for bash
 
     // Data & documentation formats
     // registry.insert("markdown".to_string(), tree_sitter_markdown::language());  // Disabled: uses tree-sitter 0.19.5
@@ -153,10 +153,9 @@ impl TreeSitterParser {
             "svelte" => {
                 self.extract_svelte_symbols(root_node, source, &mut symbols)?;
             }
-            // Bash/Shell disabled: requires tree-sitter 0.21
-            // "bash" | "sh" => {
-            //     self.extract_bash_symbols(root_node, source, &mut symbols)?;
-            // }
+            "bash" | "sh" => {
+                self.extract_bash_symbols(root_node, source, &mut symbols)?;
+            }
             "css" => {
                 self.extract_css_symbols(root_node, source, &mut symbols)?;
             }
