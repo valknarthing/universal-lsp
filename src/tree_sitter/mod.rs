@@ -24,6 +24,7 @@ static LANGUAGE_REGISTRY: Lazy<DashMap<String, Language>> = Lazy::new(|| {
     registry.insert("java".to_string(), tree_sitter_java::language());
     registry.insert("c".to_string(), tree_sitter_c::language());
     registry.insert("cpp".to_string(), tree_sitter_cpp::language());
+    registry.insert("svelte".to_string(), tree_sitter_svelte::language());
 
     registry
 });
@@ -129,6 +130,9 @@ impl TreeSitterParser {
             }
             "c" | "cpp" => {
                 self.extract_c_symbols(root_node, source, &mut symbols)?;
+            }
+            "svelte" => {
+                self.extract_svelte_symbols(root_node, source, &mut symbols)?;
             }
             _ => {}
         }
@@ -261,6 +265,12 @@ impl TreeSitterParser {
             "go" => vec!["function_declaration", "type_declaration"],
             "java" => vec!["method_declaration", "class_declaration", "field_declaration"],
             "c" | "cpp" => vec!["function_definition", "declaration"],
+            "svelte" => vec![
+                "function_declaration",
+                "const_declaration",
+                "let_declaration",
+                "script_element",
+            ],
             _ => vec![],
         };
 
@@ -569,6 +579,54 @@ impl TreeSitterParser {
 
         for child in node.children(&mut node.walk()) {
             self.extract_c_symbols(child, source, symbols)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract_svelte_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &str,
+        symbols: &mut Vec<Symbol>
+    ) -> Result<()> {
+        match node.kind() {
+            "function_declaration" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let name = name_node.utf8_text(source.as_bytes())?;
+                    let range = self.node_to_range(&node, source)?;
+                    symbols.push(Symbol {
+                        name: name.to_string(),
+                        kind: SymbolKind::FUNCTION,
+                        range,
+                        selection_range: self.node_to_range(&name_node, source)?,
+                        detail: Some("function".to_string()),
+                    });
+                }
+            }
+            "lexical_declaration" => {
+                // Handle const/let declarations in script blocks
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "variable_declarator" {
+                        if let Some(name_node) = child.child_by_field_name("name") {
+                            let name = name_node.utf8_text(source.as_bytes())?;
+                            let range = self.node_to_range(&child, source)?;
+                            symbols.push(Symbol {
+                                name: name.to_string(),
+                                kind: SymbolKind::VARIABLE,
+                                range,
+                                selection_range: self.node_to_range(&name_node, source)?,
+                                detail: Some("variable".to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        for child in node.children(&mut node.walk()) {
+            self.extract_svelte_symbols(child, source, symbols)?;
         }
 
         Ok(())
