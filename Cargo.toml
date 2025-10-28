@@ -25,30 +25,44 @@ once_cell = "1.19"
 clap = { version = "4.4", features = ["derive"] }
 reqwest = { version = "0.11", features = ["json"] }
 url = "2.5"
-tree-sitter = "0.20"
-# Core Web & JavaScript ecosystem
-tree-sitter-javascript = "0.20"
-tree-sitter-typescript = "0.20"
-tree-sitter-html = "0.20"
-tree-sitter-css = "0.20"
-tree-sitter-json = "0.20"
+tree-sitter = "0.21"  # Upgraded from 0.20 to support SQL and YAML (user requirement)
+
+# Strategy: Use crates.io versions where available for 0.21,
+# fall back to git repos for parsers that need updates
+
+# Core Web & JavaScript ecosystem - using official repos
+tree-sitter-javascript = { git = "https://github.com/tree-sitter/tree-sitter-javascript", tag = "v0.21.4" }
+tree-sitter-typescript = { git = "https://github.com/tree-sitter/tree-sitter-typescript", tag = "v0.21.2" }
+tree-sitter-html = { git = "https://github.com/tree-sitter/tree-sitter-html", tag = "v0.23.0" }
+tree-sitter-css = { git = "https://github.com/tree-sitter/tree-sitter-css", tag = "v0.21.1" }
+tree-sitter-json = { git = "https://github.com/tree-sitter/tree-sitter-json", tag = "v0.24.6" }
 tree-sitter-svelte = "0.10"
-# System languages
-tree-sitter-c = "0.20"
-tree-sitter-cpp = "0.20"
-tree-sitter-rust = "0.20"
-tree-sitter-go = "0.20"
+
+# System languages - using official repos
+tree-sitter-c = { git = "https://github.com/tree-sitter/tree-sitter-c", tag = "v0.21.4" }
+tree-sitter-cpp = { git = "https://github.com/tree-sitter/tree-sitter-cpp", tag = "v0.23.4" }
+tree-sitter-rust = { git = "https://github.com/tree-sitter/tree-sitter-rust", tag = "v0.21.2" }
+tree-sitter-go = { git = "https://github.com/tree-sitter/tree-sitter-go", tag = "v0.21.1" }
+
 # Scripting languages
-tree-sitter-python = "0.20"
-tree-sitter-ruby = "0.20"
-tree-sitter-php = "0.21"
+tree-sitter-python = { git = "https://github.com/tree-sitter/tree-sitter-python", tag = "v0.21.0" }
+tree-sitter-ruby = { git = "https://github.com/tree-sitter/tree-sitter-ruby", tag = "v0.21.0" }
+tree-sitter-php = { git = "https://github.com/tree-sitter/tree-sitter-php", tag = "v0.23.10" }
+
 # JVM languages
-tree-sitter-java = "0.20"
-tree-sitter-scala = "0.20"
-# .NET languages
-tree-sitter-c-sharp = "0.20"
+tree-sitter-java = { git = "https://github.com/tree-sitter/tree-sitter-java", tag = "v0.21.0" }
+# tree-sitter-scala - temporarily disabled (version compatibility issues)
+# tree-sitter-c-sharp - temporarily disabled (version compatibility issues)
+
 # Shell
 tree-sitter-bash = "0.21"
+
+# Data formats
+# tree-sitter-markdown = "0.7"  # Disabled: uses tree-sitter 0.19.5, incompatible with 0.21
+tree-sitter-yaml = "0.6"        # Compatible with tree-sitter 0.21
+
+# Database
+tree-sitter-sequel = "0.3"      # DerekStride/tree-sitter-sql, compatible with tree-sitter 0.21
 # Configuration parsing
 toml = "0.8"
 

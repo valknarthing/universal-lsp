@@ -14,17 +14,34 @@ use tree_sitter::{Language, Parser, Tree};
 static LANGUAGE_REGISTRY: Lazy<DashMap<String, Language>> = Lazy::new(|| {
     let registry = DashMap::new();
 
-    // Register supported languages
+    // Web & JavaScript ecosystem
     registry.insert("javascript".to_string(), tree_sitter_javascript::language());
     registry.insert("typescript".to_string(), tree_sitter_typescript::language_typescript());
     registry.insert("tsx".to_string(), tree_sitter_typescript::language_tsx());
+    registry.insert("html".to_string(), tree_sitter_html_dvdb::language());  // Using dvdb fork compatible with tree-sitter 0.20
+    registry.insert("css".to_string(), tree_sitter_css::language());
+    registry.insert("json".to_string(), tree_sitter_json::language());
+    registry.insert("svelte".to_string(), tree_sitter_svelte::language());
+
+    // Systems languages
     registry.insert("python".to_string(), tree_sitter_python::language());
     registry.insert("rust".to_string(), tree_sitter_rust::language());
     registry.insert("go".to_string(), tree_sitter_go::language());
     registry.insert("java".to_string(), tree_sitter_java::language());
     registry.insert("c".to_string(), tree_sitter_c::language());
     registry.insert("cpp".to_string(), tree_sitter_cpp::language());
-    registry.insert("svelte".to_string(), tree_sitter_svelte::language());
+
+    // Shell & scripts
+    registry.insert("bash".to_string(), tree_sitter_bash::language());
+    registry.insert("sh".to_string(), tree_sitter_bash::language());  // Alias for bash
+
+    // Data & documentation formats
+    // registry.insert("markdown".to_string(), tree_sitter_markdown::language());  // Disabled: uses tree-sitter 0.19.5, incompatible with 0.21
+    registry.insert("yaml".to_string(), tree_sitter_yaml::language());
+    registry.insert("yml".to_string(), tree_sitter_yaml::language());  // Alias for yaml
+
+    // Database
+    registry.insert("sql".to_string(), tree_sitter_sequel::language());  // Using tree-sitter-sequel (DerekStride/tree-sitter-sql)
 
     registry
 });
@@ -133,6 +150,27 @@ impl TreeSitterParser {
             }
             "svelte" => {
                 self.extract_svelte_symbols(root_node, source, &mut symbols)?;
+            }
+            "bash" | "sh" => {
+                self.extract_bash_symbols(root_node, source, &mut symbols)?;
+            }
+            "css" => {
+                self.extract_css_symbols(root_node, source, &mut symbols)?;
+            }
+            "html" => {
+                self.extract_html_symbols(root_node, source, &mut symbols)?;
+            }
+            "json" => {
+                self.extract_json_symbols(root_node, source, &mut symbols)?;
+            }
+            "markdown" => {
+                self.extract_markdown_symbols(root_node, source, &mut symbols)?;
+            }
+            "sql" => {
+                self.extract_sql_symbols(root_node, source, &mut symbols)?;
+            }
+            "yaml" | "yml" => {
+                self.extract_yaml_symbols(root_node, source, &mut symbols)?;
             }
             _ => {}
         }
@@ -627,6 +665,265 @@ impl TreeSitterParser {
 
         for child in node.children(&mut node.walk()) {
             self.extract_svelte_symbols(child, source, symbols)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract_bash_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &str,
+        symbols: &mut Vec<Symbol>
+    ) -> Result<()> {
+        match node.kind() {
+            "function_definition" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let name = name_node.utf8_text(source.as_bytes())?;
+                    let range = self.node_to_range(&node, source)?;
+                    symbols.push(Symbol {
+                        name: name.to_string(),
+                        kind: SymbolKind::FUNCTION,
+                        range,
+                        selection_range: self.node_to_range(&name_node, source)?,
+                        detail: Some("function".to_string()),
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        for child in node.children(&mut node.walk()) {
+            self.extract_bash_symbols(child, source, symbols)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract_css_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &str,
+        symbols: &mut Vec<Symbol>
+    ) -> Result<()> {
+        match node.kind() {
+            "rule_set" | "class_selector" | "id_selector" => {
+                // Extract CSS selectors
+                if let Some(name_node) = node.child(0) {
+                    if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                        let range = self.node_to_range(&node, source)?;
+                        symbols.push(Symbol {
+                            name: name.to_string(),
+                            kind: SymbolKind::CLASS,
+                            range,
+                            selection_range: self.node_to_range(&name_node, source)?,
+                            detail: Some("selector".to_string()),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        for child in node.children(&mut node.walk()) {
+            self.extract_css_symbols(child, source, symbols)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract_html_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &str,
+        symbols: &mut Vec<Symbol>
+    ) -> Result<()> {
+        match node.kind() {
+            "element" | "self_closing_tag" => {
+                if let Some(start_tag) = node.child_by_field_name("start_tag") {
+                    if let Some(name_node) = start_tag.child_by_field_name("tag_name") {
+                        let name = name_node.utf8_text(source.as_bytes())?;
+                        // Look for id attribute
+                        if let Some(id) = self.get_html_id_attribute(&node, source) {
+                            let range = self.node_to_range(&node, source)?;
+                            symbols.push(Symbol {
+                                name: format!("{} (id={})", name, id),
+                                kind: SymbolKind::STRUCT,
+                                range,
+                                selection_range: self.node_to_range(&name_node, source)?,
+                                detail: Some("element".to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        for child in node.children(&mut node.walk()) {
+            self.extract_html_symbols(child, source, symbols)?;
+        }
+
+        Ok(())
+    }
+
+    fn get_html_id_attribute(&self, node: &tree_sitter::Node, source: &str) -> Option<String> {
+        for child in node.children(&mut node.walk()) {
+            if child.kind() == "attribute" {
+                if let Some(name) = child.child_by_field_name("name") {
+                    if let Ok(attr_name) = name.utf8_text(source.as_bytes()) {
+                        if attr_name == "id" {
+                            if let Some(value) = child.child_by_field_name("value") {
+                                if let Ok(id) = value.utf8_text(source.as_bytes()) {
+                                    return Some(id.trim_matches('"').to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_json_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &str,
+        symbols: &mut Vec<Symbol>
+    ) -> Result<()> {
+        match node.kind() {
+            "pair" => {
+                if let Some(key_node) = node.child_by_field_name("key") {
+                    let key = key_node.utf8_text(source.as_bytes())?;
+                    let range = self.node_to_range(&node, source)?;
+                    symbols.push(Symbol {
+                        name: key.trim_matches('"').to_string(),
+                        kind: SymbolKind::FIELD,
+                        range,
+                        selection_range: self.node_to_range(&key_node, source)?,
+                        detail: Some("property".to_string()),
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        for child in node.children(&mut node.walk()) {
+            self.extract_json_symbols(child, source, symbols)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract_markdown_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &str,
+        symbols: &mut Vec<Symbol>
+    ) -> Result<()> {
+        match node.kind() {
+            "atx_heading" | "setext_heading" => {
+                // Extract markdown headings
+                if let Ok(heading_text) = node.utf8_text(source.as_bytes()) {
+                    let heading_text = heading_text.trim();
+                    let range = self.node_to_range(&node, source)?;
+
+                    // Determine heading level
+                    let level = if heading_text.starts_with("######") {
+                        6
+                    } else if heading_text.starts_with("#####") {
+                        5
+                    } else if heading_text.starts_with("####") {
+                        4
+                    } else if heading_text.starts_with("###") {
+                        3
+                    } else if heading_text.starts_with("##") {
+                        2
+                    } else {
+                        1
+                    };
+
+                    let title = heading_text.trim_start_matches('#').trim();
+
+                    symbols.push(Symbol {
+                        name: title.to_string(),
+                        kind: SymbolKind::STRING,  // Using STRING for headings
+                        range,
+                        selection_range: range,
+                        detail: Some(format!("h{}", level)),
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        for child in node.children(&mut node.walk()) {
+            self.extract_markdown_symbols(child, source, symbols)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract_sql_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &str,
+        symbols: &mut Vec<Symbol>
+    ) -> Result<()> {
+        match node.kind() {
+            "create_table_statement" | "create_view_statement" | "create_function_statement" => {
+                // Extract SQL object names
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "identifier" || child.kind() == "table_name" {
+                        let name = child.utf8_text(source.as_bytes())?;
+                        let range = self.node_to_range(&node, source)?;
+                        symbols.push(Symbol {
+                            name: name.to_string(),
+                            kind: SymbolKind::CLASS,
+                            range,
+                            selection_range: self.node_to_range(&child, source)?,
+                            detail: Some(node.kind().replace("_statement", "").to_string()),
+                        });
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        for child in node.children(&mut node.walk()) {
+            self.extract_sql_symbols(child, source, symbols)?;
+        }
+
+        Ok(())
+    }
+
+    fn extract_yaml_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &str,
+        symbols: &mut Vec<Symbol>
+    ) -> Result<()> {
+        match node.kind() {
+            "block_mapping_pair" => {
+                if let Some(key_node) = node.child_by_field_name("key") {
+                    let key = key_node.utf8_text(source.as_bytes())?;
+                    let range = self.node_to_range(&node, source)?;
+                    symbols.push(Symbol {
+                        name: key.to_string(),
+                        kind: SymbolKind::FIELD,
+                        range,
+                        selection_range: self.node_to_range(&key_node, source)?,
+                        detail: Some("key".to_string()),
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        for child in node.children(&mut node.walk()) {
+            self.extract_yaml_symbols(child, source, symbols)?;
         }
 
         Ok(())
