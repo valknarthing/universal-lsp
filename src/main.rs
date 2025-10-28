@@ -11,18 +11,24 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use std::sync::Arc;
 
+mod code_actions;
 mod config;
+mod diagnostics;
+mod formatting;
 mod language;
 mod mcp;
 mod pipeline;
 mod proxy;
 mod tree_sitter;
 
+use code_actions::CodeActionProvider;
 use config::Config;
+use diagnostics::DiagnosticProvider;
+use formatting::FormattingProvider;
 use language::detect_language;
+use mcp::McpRequest;
 use pipeline::{McpPipeline, merge_mcp_responses, lsp_position_to_mcp};
 use proxy::{ProxyConfig, ProxyManager};
-use mcp::McpRequest;
 use tree_sitter::TreeSitterParser;
 
 #[derive(Debug)]
@@ -33,6 +39,9 @@ struct UniversalLsp {
     proxy_manager: Option<Arc<ProxyManager>>,
     parser: Arc<dashmap::DashMap<String, TreeSitterParser>>,
     documents: Arc<dashmap::DashMap<String, String>>,
+    diagnostic_provider: Arc<DiagnosticProvider>,
+    code_action_provider: Arc<CodeActionProvider>,
+    formatting_provider: Arc<FormattingProvider>,
 }
 
 impl UniversalLsp {
@@ -68,6 +77,9 @@ impl UniversalLsp {
             proxy_manager,
             parser: Arc::new(dashmap::DashMap::new()),
             documents: Arc::new(dashmap::DashMap::new()),
+            diagnostic_provider: Arc::new(DiagnosticProvider::new()),
+            code_action_provider: Arc::new(CodeActionProvider::new()),
+            formatting_provider: Arc::new(FormattingProvider::new()),
         }
     }
 }
@@ -85,6 +97,9 @@ impl LanguageServer for UniversalLsp {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -310,6 +325,54 @@ impl LanguageServer for UniversalLsp {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
         self.documents.remove(&uri);
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = &params.text_document.uri;
+        let range = params.range;
+        let diagnostics = params.context.diagnostics;
+        let lang = detect_language(uri.path());
+
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            match self.code_action_provider.get_actions(uri, range, &content, diagnostics, lang) {
+                Ok(actions) => Ok(Some(actions)),
+                Err(_) => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = &params.text_document.uri;
+        let lang = detect_language(uri.path());
+
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            match self.formatting_provider.format_document(&content, lang, uri) {
+                Ok(edits) => Ok(Some(edits)),
+                Err(_) => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let uri = &params.text_document.uri;
+        let range = params.range;
+        let lang = detect_language(uri.path());
+
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            match self.formatting_provider.format_range(&content, range, lang, uri) {
+                Ok(edits) => Ok(Some(edits)),
+                Err(_) => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
     }
 }
 
