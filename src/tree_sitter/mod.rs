@@ -19,11 +19,11 @@ static LANGUAGE_REGISTRY: Lazy<DashMap<String, Language>> = Lazy::new(|| {
     registry.insert("typescript".to_string(), tree_sitter_typescript::language_typescript());
     registry.insert("tsx".to_string(), tree_sitter_typescript::language_tsx());
 
-    // Web core languages - DISABLED: HTML/CSS/JSON/Svelte parsers use tree-sitter 0.20, incompatible with 0.21
-    // registry.insert("html".to_string(), tree_sitter_html::language());
-    // registry.insert("css".to_string(), tree_sitter_css::language());
-    // registry.insert("json".to_string(), tree_sitter_json::language());
-    // registry.insert("svelte".to_string(), tree_sitter_svelte::language());
+    // Web core languages
+    registry.insert("html".to_string(), tree_sitter_html::language());
+    registry.insert("css".to_string(), tree_sitter_css::language());
+    registry.insert("json".to_string(), tree_sitter_json::language());
+    registry.insert("svelte".to_string(), tree_sitter_svelte::language());
 
     // Systems languages
     registry.insert("python".to_string(), tree_sitter_python::language());
@@ -33,17 +33,17 @@ static LANGUAGE_REGISTRY: Lazy<DashMap<String, Language>> = Lazy::new(|| {
     registry.insert("c".to_string(), tree_sitter_c::language());
     registry.insert("cpp".to_string(), tree_sitter_cpp::language());
 
-    // Shell & scripts
-    registry.insert("bash".to_string(), tree_sitter_bash::language());
-    registry.insert("sh".to_string(), tree_sitter_bash::language());  // Alias for bash
+    // Shell & scripts - REMOVED: Bash requires tree-sitter 0.21, incompatible with 0.20.10
+    // registry.insert("bash".to_string(), tree_sitter_bash::language());
+    // registry.insert("sh".to_string(), tree_sitter_bash::language());  // Alias for bash
 
     // Data & documentation formats
-    // registry.insert("markdown".to_string(), tree_sitter_markdown::language());  // Disabled: uses tree-sitter 0.19.5, incompatible with 0.21
-    registry.insert("yaml".to_string(), tree_sitter_yaml::language());
-    registry.insert("yml".to_string(), tree_sitter_yaml::language());  // Alias for yaml
+    // registry.insert("markdown".to_string(), tree_sitter_markdown::language());  // Disabled: uses tree-sitter 0.19.5
+    // registry.insert("yaml".to_string(), tree_sitter_yaml::language());  // REMOVED: YAML requires tree-sitter 0.21
+    // registry.insert("yml".to_string(), tree_sitter_yaml::language());  // Alias for yaml
 
     // Database
-    registry.insert("sql".to_string(), tree_sitter_sequel::language());  // Using tree-sitter-sequel (DerekStride/tree-sitter-sql)
+    // registry.insert("sql".to_string(), tree_sitter_sequel::language());  // REMOVED: SQL requires tree-sitter 0.21
 
     registry
 });
@@ -102,7 +102,7 @@ impl TreeSitterParser {
     /// Set language for parsing
     pub fn set_language(&mut self, lang: &str) -> Result<()> {
         if let Some(language) = LANGUAGE_REGISTRY.get(lang) {
-            self.parser.set_language(&*language)?;
+            self.parser.set_language(*language)?;
             self.language = Some(language.clone());
             Ok(())
         } else {
@@ -150,31 +150,33 @@ impl TreeSitterParser {
             "c" | "cpp" => {
                 self.extract_c_symbols(root_node, source, &mut symbols)?;
             }
-            // "svelte" => {
-            //     self.extract_svelte_symbols(root_node, source, &mut symbols)?;
-            // }
-            "bash" | "sh" => {
-                self.extract_bash_symbols(root_node, source, &mut symbols)?;
+            "svelte" => {
+                self.extract_svelte_symbols(root_node, source, &mut symbols)?;
             }
-            // HTML/CSS/JSON disabled: parsers use tree-sitter 0.20, incompatible with 0.21
-            // "css" => {
-            //     self.extract_css_symbols(root_node, source, &mut symbols)?;
+            // Bash/Shell disabled: requires tree-sitter 0.21
+            // "bash" | "sh" => {
+            //     self.extract_bash_symbols(root_node, source, &mut symbols)?;
             // }
-            // "html" => {
-            //     self.extract_html_symbols(root_node, source, &mut symbols)?;
-            // }
-            // "json" => {
-            //     self.extract_json_symbols(root_node, source, &mut symbols)?;
-            // }
+            "css" => {
+                self.extract_css_symbols(root_node, source, &mut symbols)?;
+            }
+            "html" => {
+                self.extract_html_symbols(root_node, source, &mut symbols)?;
+            }
+            "json" => {
+                self.extract_json_symbols(root_node, source, &mut symbols)?;
+            }
             // "markdown" => {
             //     self.extract_markdown_symbols(root_node, source, &mut symbols)?;
             // }
-            "sql" => {
-                self.extract_sql_symbols(root_node, source, &mut symbols)?;
-            }
-            "yaml" | "yml" => {
-                self.extract_yaml_symbols(root_node, source, &mut symbols)?;
-            }
+            // SQL disabled: requires tree-sitter 0.21
+            // "sql" => {
+            //     self.extract_sql_symbols(root_node, source, &mut symbols)?;
+            // }
+            // YAML disabled: requires tree-sitter 0.21
+            // "yaml" | "yml" => {
+            //     self.extract_yaml_symbols(root_node, source, &mut symbols)?;
+            // }
             _ => {}
         }
 
