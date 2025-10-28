@@ -1,0 +1,39 @@
+[package]
+name = "universal-lsp"
+version = "0.1.0"
+edition = "2021"
+authors = ["Valknar"]
+description = "Universal Language Server Protocol implementation supporting 242+ languages with AI-powered features"
+license = "MIT"
+repository = "https://github.com/valknarthing/universal-lsp"
+readme = "README.md"
+
+[[bin]]
+name = "universal-lsp"
+path = "src/main.rs"
+
+[dependencies]
+tower-lsp = "0.20"
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dashmap = "5.5"
+once_cell = "1.19"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tower = "0.4"
+tempfile = "3.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[features]
+default = []
+ai = []
