@@ -11,6 +11,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use std::sync::Arc;
 
+mod ai;
 mod code_actions;
 mod config;
 mod diagnostics;
@@ -23,6 +24,7 @@ mod text_sync;
 mod tree_sitter;
 mod workspace;
 
+use ai::{ClaudeClient, ClaudeConfig, CompletionContext};
 use code_actions::CodeActionProvider;
 use config::Config;
 use diagnostics::DiagnosticProvider;
@@ -41,6 +43,7 @@ struct UniversalLsp {
     config: Arc<Config>,
     pipeline: Option<Arc<McpPipeline>>,
     proxy_manager: Option<Arc<ProxyManager>>,
+    claude_client: Option<Arc<ClaudeClient>>,
     parser: Arc<dashmap::DashMap<String, TreeSitterParser>>,
     documents: Arc<dashmap::DashMap<String, String>>,
     diagnostic_provider: Arc<DiagnosticProvider>,
@@ -76,11 +79,29 @@ impl UniversalLsp {
             None
         };
 
+        // Create Claude client if API key is available
+        let claude_client = if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
+            let claude_config = ClaudeConfig {
+                api_key,
+                ..Default::default()
+            };
+            match ClaudeClient::new(claude_config) {
+                Ok(client) => Some(Arc::new(client)),
+                Err(e) => {
+                    tracing::warn!("Failed to initialize Claude client: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             client,
             config: Arc::new(config),
             pipeline,
             proxy_manager,
+            claude_client,
             parser: Arc::new(dashmap::DashMap::new()),
             documents: Arc::new(dashmap::DashMap::new()),
             diagnostic_provider: Arc::new(DiagnosticProvider::new()),
@@ -238,6 +259,46 @@ impl LanguageServer for UniversalLsp {
             },
         ];
 
+        // Try AI-powered completions from Claude (highest priority)
+        if let Some(claude_client) = &self.claude_client {
+            if let Some(content) = self.documents.get(uri.as_str()) {
+                // Extract prefix (code before cursor) and suffix (code after cursor)
+                let byte_offset = position_to_byte(&content, position);
+                let prefix = content[..byte_offset].to_string();
+                let suffix = if byte_offset < content.len() {
+                    Some(content[byte_offset..].to_string())
+                } else {
+                    None
+                };
+
+                let completion_context = CompletionContext {
+                    language: lang.to_string(),
+                    file_path: uri.path().to_string(),
+                    prefix,
+                    suffix,
+                    context: None, // Could add surrounding context in future
+                };
+
+                match claude_client.get_completions(&completion_context).await {
+                    Ok(suggestions) => {
+                        for suggestion in suggestions {
+                            items.push(CompletionItem {
+                                label: suggestion.text.clone(),
+                                kind: Some(CompletionItemKind::TEXT),
+                                detail: suggestion.detail.or(Some("Claude AI".to_string())),
+                                insert_text: Some(suggestion.text),
+                                sort_text: Some(format!("0_{}", suggestion.confidence)), // Higher priority
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Claude completion failed: {}", e);
+                    }
+                }
+            }
+        }
+
         // Try tree-sitter symbol-based completions
         if let Some(content) = self.documents.get(uri.as_str()) {
             if let Ok(mut parser) = TreeSitterParser::new() {
@@ -258,6 +319,7 @@ impl LanguageServer for UniversalLsp {
                                     label: symbol.name.clone(),
                                     kind: Some(completion_kind),
                                     detail: symbol.detail.or(Some(format!("{:?}", symbol.kind))),
+                                    sort_text: Some(format!("1_{}", symbol.name)), // Lower priority than AI
                                     ..Default::default()
                                 });
                             }
