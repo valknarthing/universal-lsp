@@ -30,6 +30,8 @@ url = "2.5"
 tokio-test = "0.4"
 tower = "0.4"
 tempfile = "3.8"
+warp = "0.3"  # For mock HTTP servers in tests
+hyper = "0.14"  # For HTTP testing
 
 [profile.release]
 opt-level = 3
