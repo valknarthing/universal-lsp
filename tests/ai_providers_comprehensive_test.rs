@@ -79,7 +79,7 @@ fn test_completion_context_creation() {
         file_path: "/home/user/project/src/main.rs".to_string(),
         prefix: "fn main() {\n    let x = ".to_string(),
         suffix: Some(";\n}".to_string()),
-        additional_context: Some("use std::collections::HashMap;".to_string()),
+        context: Some("use std::collections::HashMap;".to_string()),
     };
 
     assert_eq!(context.language, "rust");
@@ -95,22 +95,22 @@ fn test_completion_context_without_suffix() {
         file_path: "test.py".to_string(),
         prefix: "def hello():\n    ".to_string(),
         suffix: None,
-        additional_context: None,
+        context: None,
     };
 
     assert_eq!(context.language, "python");
     assert!(context.suffix.is_none());
-    assert!(context.additional_context.is_none());
+    assert!(context.context.is_none());
 }
 
 #[test]
-fn test_completion_context_with_additional_context() {
+fn test_completion_context_with_context() {
     let context = CompletionContext {
         language: "typescript".to_string(),
         file_path: "src/app.ts".to_string(),
         prefix: "function processUser(user: User) {\n    ".to_string(),
         suffix: None,
-        additional_context: Some(r#"
+        context: Some(r#"
 interface User {
     id: string;
     name: string;
@@ -119,8 +119,8 @@ interface User {
 "#.to_string()),
     };
 
-    assert!(context.additional_context.is_some());
-    let additional = context.additional_context.unwrap();
+    assert!(context.context.is_some());
+    let additional = context.context.unwrap();
     assert!(additional.contains("interface User"));
 }
 
@@ -187,7 +187,7 @@ fn test_completion_context_multiline_prefix() {
         file_path: "calc.js".to_string(),
         prefix: multiline_code.clone(),
         suffix: Some(";\n}".to_string()),
-        additional_context: None,
+        context: None,
     };
 
     assert!(context.prefix.contains("calculateTotal"));
@@ -201,11 +201,11 @@ fn test_completion_context_unicode() {
         file_path: "unicode_test.py".to_string(),
         prefix: "def 你好():\n    return \"".to_string(),
         suffix: Some("\"\n    pass".to_string()),
-        additional_context: Some("# 中文注释\n# Russian: Привет".to_string()),
+        context: Some("# 中文注释\n# Russian: Привет".to_string()),
     };
 
     assert!(context.prefix.contains("你好"));
-    assert!(context.additional_context.unwrap().contains("Привет"));
+    assert!(context.context.unwrap().contains("Привет"));
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn test_completion_context_clone() {
         file_path: "main.rs".to_string(),
         prefix: "fn main() {".to_string(),
         suffix: Some("}".to_string()),
-        additional_context: None,
+        context: None,
     };
 
     let context2 = context1.clone();
@@ -262,7 +262,7 @@ fn test_completion_context_various_languages() {
             file_path: format!("test.{}", lang),
             prefix: prefix.to_string(),
             suffix: None,
-            additional_context: None,
+            context: None,
         };
 
         assert_eq!(context.language, lang);
@@ -292,7 +292,7 @@ fn test_completion_context_debug_format() {
         file_path: "test.rs".to_string(),
         prefix: "fn test() {".to_string(),
         suffix: None,
-        additional_context: None,
+        context: None,
     };
 
     let debug_string = format!("{:?}", context);
@@ -307,7 +307,7 @@ fn test_completion_context_empty_fields() {
         file_path: String::new(),
         prefix: String::new(),
         suffix: None,
-        additional_context: None,
+        context: None,
     };
 
     assert!(context.language.is_empty());
@@ -341,7 +341,7 @@ fn test_completion_context_large_prefix() {
         file_path: "large_file.rs".to_string(),
         prefix: large_prefix.clone(),
         suffix: None,
-        additional_context: None,
+        context: None,
     };
 
     assert!(context.prefix.len() > 1000);
@@ -378,7 +378,7 @@ fn test_completion_context_with_imports() {
         file_path: "app.py".to_string(),
         prefix: "def process_data(data):\n    ".to_string(),
         suffix: None,
-        additional_context: Some(r#"
+        context: Some(r#"
 import json
 import requests
 from typing import Dict, List
@@ -386,7 +386,7 @@ from dataclasses import dataclass
 "#.to_string()),
     };
 
-    let additional = context.additional_context.unwrap();
+    let additional = context.context.unwrap();
     assert!(additional.contains("import json"));
     assert!(additional.contains("from typing"));
 }
@@ -407,7 +407,7 @@ fn test_completion_context_edge_cases() {
             file_path: file.to_string(),
             prefix: prefix.unwrap_or("").to_string(),
             suffix: suffix.map(|s| s.to_string()),
-            additional_context: None,
+            context: None,
         };
 
         // Should not panic, all edge cases should be valid
@@ -439,7 +439,7 @@ fn test_concurrent_context_creation() {
                 file_path: format!("file{}.rs", i),
                 prefix: format!("fn test{}() {{", i),
                 suffix: Some("}}".to_string()),
-                additional_context: None,
+                context: None,
             }
         });
         handles.push(handle);
