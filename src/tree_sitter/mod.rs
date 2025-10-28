@@ -18,7 +18,12 @@ static LANGUAGE_REGISTRY: Lazy<DashMap<String, Language>> = Lazy::new(|| {
     registry.insert("javascript".to_string(), tree_sitter_javascript::language());
     registry.insert("typescript".to_string(), tree_sitter_typescript::language_typescript());
     registry.insert("tsx".to_string(), tree_sitter_typescript::language_tsx());
-    // HTML, CSS, JSON, Svelte temporarily disabled due to tree-sitter version conflicts
+
+    // Web core languages - DISABLED: HTML/CSS/JSON/Svelte parsers use tree-sitter 0.20, incompatible with 0.21
+    // registry.insert("html".to_string(), tree_sitter_html::language());
+    // registry.insert("css".to_string(), tree_sitter_css::language());
+    // registry.insert("json".to_string(), tree_sitter_json::language());
+    // registry.insert("svelte".to_string(), tree_sitter_svelte::language());
 
     // Systems languages
     registry.insert("python".to_string(), tree_sitter_python::language());
@@ -151,6 +156,7 @@ impl TreeSitterParser {
             "bash" | "sh" => {
                 self.extract_bash_symbols(root_node, source, &mut symbols)?;
             }
+            // HTML/CSS/JSON disabled: parsers use tree-sitter 0.20, incompatible with 0.21
             // "css" => {
             //     self.extract_css_symbols(root_node, source, &mut symbols)?;
             // }

@@ -34,8 +34,11 @@ tree-sitter = "0.21"  # Upgraded from 0.20 to support SQL and YAML (user require
 tree-sitter-javascript = "0.21"
 tree-sitter-typescript = "0.21"
 tree-sitter-svelte = "0.10"
-# HTML, CSS, JSON temporarily disabled due to cc crate version conflicts
-# Will add back once compatible versions are found
+
+# Web core languages - DISABLED: v0.20.x versions use tree-sitter 0.20.10, incompatible with 0.21
+# tree-sitter-html = { git = "https://github.com/tree-sitter/tree-sitter-html", tag = "v0.20.0" }
+# tree-sitter-css = { git = "https://github.com/tree-sitter/tree-sitter-css", tag = "v0.20.0" }
+# tree-sitter-json = { git = "https://github.com/tree-sitter/tree-sitter-json", tag = "v0.20.2" }
 
 # System languages - using crates.io 0.21 versions
 tree-sitter-c = "0.21"
