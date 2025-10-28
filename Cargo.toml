@@ -48,6 +48,8 @@ tree-sitter-scala = "0.20"
 tree-sitter-c-sharp = "0.20"
 # Shell
 tree-sitter-bash = "0.21"
+# Configuration parsing
+toml = "0.8"
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -55,6 +57,11 @@ tower = "0.4"
 tempfile = "3.8"
 warp = "0.3"  # For mock HTTP servers in tests
 hyper = "0.14"  # For HTTP testing
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "performance"
+harness = false
 
 [profile.release]
 opt-level = 3

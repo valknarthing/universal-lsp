@@ -19,7 +19,9 @@ mod language;
 mod mcp;
 mod pipeline;
 mod proxy;
+mod text_sync;
 mod tree_sitter;
+mod workspace;
 
 use code_actions::CodeActionProvider;
 use config::Config;
@@ -29,7 +31,9 @@ use language::detect_language;
 use mcp::McpRequest;
 use pipeline::{McpPipeline, merge_mcp_responses, lsp_position_to_mcp};
 use proxy::{ProxyConfig, ProxyManager};
+use text_sync::TextSyncManager;
 use tree_sitter::TreeSitterParser;
+use workspace::WorkspaceManager;
 
 #[derive(Debug)]
 struct UniversalLsp {
@@ -42,6 +46,8 @@ struct UniversalLsp {
     diagnostic_provider: Arc<DiagnosticProvider>,
     code_action_provider: Arc<CodeActionProvider>,
     formatting_provider: Arc<FormattingProvider>,
+    workspace_manager: Arc<WorkspaceManager>,
+    text_sync_manager: Arc<TextSyncManager>,
 }
 
 impl UniversalLsp {
@@ -80,17 +86,36 @@ impl UniversalLsp {
             diagnostic_provider: Arc::new(DiagnosticProvider::new()),
             code_action_provider: Arc::new(CodeActionProvider::new()),
             formatting_provider: Arc::new(FormattingProvider::new()),
+            workspace_manager: Arc::new(WorkspaceManager::new()),
+            text_sync_manager: Arc::new(TextSyncManager::new()),
         }
     }
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for UniversalLsp {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        // Initialize workspace folders if provided
+        if let Some(folders) = params.workspace_folders {
+            for folder in folders {
+                if let Err(e) = self.workspace_manager.add_folder(folder) {
+                    tracing::warn!("Failed to add workspace folder: {}", e);
+                }
+            }
+        }
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::INCREMENTAL),
+                        will_save: None,
+                        will_save_wait_until: None,
+                        save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                            include_text: Some(false),
+                        })),
+                    },
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions::default()),
@@ -100,6 +125,13 @@ impl LanguageServer for UniversalLsp {
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
+                workspace: Some(WorkspaceServerCapabilities {
+                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                        supported: Some(true),
+                        change_notifications: Some(OneOf::Left(true)),
+                    }),
+                    file_operations: None,
+                }),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -311,20 +343,58 @@ impl LanguageServer for UniversalLsp {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
-        let content = params.text_document.text;
+        let content = params.text_document.text.clone();
+
+        // Use text_sync_manager for incremental tracking
+        self.text_sync_manager.did_open(params);
+
+        // Keep old documents map for compatibility
         self.documents.insert(uri, content);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
-        if let Some(change) = params.content_changes.into_iter().next() {
-            self.documents.insert(uri, change.text);
+
+        // Use text_sync_manager for incremental changes
+        if let Err(e) = self.text_sync_manager.did_change(params) {
+            tracing::error!("Failed to apply incremental changes: {}", e);
+        }
+
+        // Update old documents map for compatibility
+        if let Some(content) = self.text_sync_manager.get_content(&uri) {
+            self.documents.insert(uri, content);
         }
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+
+        // Close in both managers
+        self.text_sync_manager.did_close(params);
         self.documents.remove(&uri);
+    }
+
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        // Add new folders
+        for added in params.event.added {
+            if let Err(e) = self.workspace_manager.add_folder(added) {
+                tracing::error!("Failed to add workspace folder: {}", e);
+            }
+        }
+
+        // Remove folders
+        for removed in params.event.removed {
+            if let Err(e) = self.workspace_manager.remove_folder(&removed.uri) {
+                tracing::error!("Failed to remove workspace folder: {}", e);
+            }
+        }
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!("Workspace folders updated. Total: {}", self.workspace_manager.count()),
+            )
+            .await;
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
