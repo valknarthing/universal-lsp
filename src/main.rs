@@ -16,12 +16,14 @@ mod language;
 mod mcp;
 mod pipeline;
 mod proxy;
+mod tree_sitter;
 
 use config::Config;
 use language::detect_language;
 use pipeline::{McpPipeline, merge_mcp_responses, lsp_position_to_mcp};
 use proxy::{ProxyConfig, ProxyManager};
 use mcp::McpRequest;
+use tree_sitter::TreeSitterParser;
 
 #[derive(Debug)]
 struct UniversalLsp {
@@ -29,6 +31,8 @@ struct UniversalLsp {
     config: Arc<Config>,
     pipeline: Option<Arc<McpPipeline>>,
     proxy_manager: Option<Arc<ProxyManager>>,
+    parser: Arc<dashmap::DashMap<String, TreeSitterParser>>,
+    documents: Arc<dashmap::DashMap<String, String>>,
 }
 
 impl UniversalLsp {
@@ -62,6 +66,8 @@ impl UniversalLsp {
             config: Arc::new(config),
             pipeline,
             proxy_manager,
+            parser: Arc::new(dashmap::DashMap::new()),
+            documents: Arc::new(dashmap::DashMap::new()),
         }
     }
 }
@@ -77,6 +83,8 @@ impl LanguageServer for UniversalLsp {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions::default()),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -225,6 +233,83 @@ impl LanguageServer for UniversalLsp {
         }
 
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let lang = detect_language(uri.path());
+
+        // Try to get document content
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            // Try tree-sitter based definition finding
+            let Ok(mut parser) = TreeSitterParser::new() else {
+                return Ok(None);
+            };
+            if parser.set_language(lang).is_ok() {
+                if let Ok(tree) = parser.parse(&content, uri.as_str()) {
+                    if let Ok(Some(def)) = parser.find_definition(&tree, &content, position, lang) {
+                        return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                            uri: uri.clone(),
+                            range: def.range,
+                        })));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let lang = detect_language(uri.path());
+
+        // Try to get document content
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            // Try tree-sitter based reference finding
+            let Ok(mut parser) = TreeSitterParser::new() else {
+                return Ok(None);
+            };
+            if parser.set_language(lang).is_ok() {
+                if let Ok(tree) = parser.parse(&content, uri.as_str()) {
+                    if let Ok(refs) = parser.find_references(&tree, &content, position, lang) {
+                        let locations: Vec<Location> = refs
+                            .into_iter()
+                            .map(|r| Location {
+                                uri: uri.clone(),
+                                range: r.range,
+                            })
+                            .collect();
+                        return Ok(Some(locations));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+        let content = params.text_document.text;
+        self.documents.insert(uri, content);
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+        if let Some(change) = params.content_changes.into_iter().next() {
+            self.documents.insert(uri, change.text);
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri.to_string();
+        self.documents.remove(&uri);
     }
 }
 
