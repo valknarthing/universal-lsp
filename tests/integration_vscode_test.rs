@@ -105,7 +105,7 @@ impl MockLspClient {
                 "--log-level=debug",
                 &format!("--mcp-pre={}", mcp_url),
                 "--mcp-timeout=3000",
-                "--mcp-cache=true",
+                "--mcp-cache",
             ])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())

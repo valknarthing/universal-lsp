@@ -10,59 +10,52 @@ use crate::config::Config;
 use crate::mcp::{McpClient, McpConfig, McpRequest, McpResponse, Position, TransportType};
 
 /// Pipeline for MCP-enhanced LSP processing
-#[derive(Debug)]
 pub struct McpPipeline {
-    pre_clients: Vec<Arc<McpClient>>,
-    post_clients: Vec<Arc<McpClient>>,
+    clients: Vec<Arc<McpClient>>,
 }
 
 impl McpPipeline {
     /// Create a new MCP pipeline from configuration
     pub fn new(config: &Config) -> Self {
-        let pre_clients = config
+        let clients = config
             .mcp
-            .pre_servers
-            .iter()
-            .map(|url| {
+            .servers
+            .values()
+            .map(|server_config| {
+                // Determine transport type based on target
+                let transport = if server_config.target.starts_with("http://")
+                    || server_config.target.starts_with("https://")
+                {
+                    TransportType::Http
+                } else {
+                    TransportType::Stdio
+                };
+
                 Arc::new(McpClient::new(McpConfig {
-                    server_url: url.clone(),
-                    transport: TransportType::Http,
+                    server_url: server_config.target.clone(),
+                    transport,
                     timeout_ms: config.mcp.timeout_ms,
                 }))
             })
             .collect();
 
-        let post_clients = config
-            .mcp
-            .post_servers
-            .iter()
-            .map(|url| {
-                Arc::new(McpClient::new(McpConfig {
-                    server_url: url.clone(),
-                    transport: TransportType::Http,
-                    timeout_ms: config.mcp.timeout_ms,
-                }))
-            })
-            .collect();
-
-        Self {
-            pre_clients,
-            post_clients,
-        }
+        Self { clients }
     }
 
     /// Pre-process a request through MCP servers
     pub async fn pre_process(&self, request: McpRequest) -> Result<Vec<McpResponse>> {
-        if self.pre_clients.is_empty() {
+        if self.clients.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Parallel requests to all pre-processing servers
+        // Parallel requests to all MCP servers
         let mut tasks = Vec::new();
-        for client in &self.pre_clients {
+        for client in &self.clients {
             let client = Arc::clone(client);
             let req = request.clone();
-            tasks.push(tokio::spawn(async move { client.query(&req).await }));
+            tasks.push(tokio::spawn(async move {
+                client.query(&req).await
+            }));
         }
 
         // Collect results, ignoring failures
@@ -82,37 +75,18 @@ impl McpPipeline {
         request: McpRequest,
         _original_response: &str,
     ) -> Result<Vec<McpResponse>> {
-        if self.post_clients.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Parallel requests to all post-processing servers
-        let mut tasks = Vec::new();
-        for client in &self.post_clients {
-            let client = Arc::clone(client);
-            let req = request.clone();
-            tasks.push(tokio::spawn(async move { client.query(&req).await }));
-        }
-
-        // Collect results, ignoring failures
-        let mut results = Vec::new();
-        for task in tasks {
-            if let Ok(Ok(response)) = task.await {
-                results.push(response);
-            }
-        }
-
-        Ok(results)
+        // Same as pre_process - all MCP servers provide context for both phases
+        self.pre_process(request).await
     }
 
     /// Check if pipeline has any pre-processing servers
     pub fn has_pre_processing(&self) -> bool {
-        !self.pre_clients.is_empty()
+        !self.clients.is_empty()
     }
 
     /// Check if pipeline has any post-processing servers
     pub fn has_post_processing(&self) -> bool {
-        !self.post_clients.is_empty()
+        !self.clients.is_empty()
     }
 }
 

@@ -468,7 +468,7 @@ async fn test_terminal_systemd_like_daemon() {
         .args(&[
             "--log-level=info",
             &format!("--mcp-pre={}", mcp_server.url()),
-            "--mcp-cache=true",
+            "--mcp-cache",
             "--max-concurrent=50",
         ])
         .stdin(std::process::Stdio::piped())

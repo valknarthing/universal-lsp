@@ -37,7 +37,6 @@ use text_sync::TextSyncManager;
 use tree_sitter::TreeSitterParser;
 use workspace::WorkspaceManager;
 
-#[derive(Debug)]
 struct UniversalLsp {
     client: Client,
     config: Arc<Config>,

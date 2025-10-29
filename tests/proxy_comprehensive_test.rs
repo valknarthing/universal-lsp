@@ -465,15 +465,22 @@ async fn test_large_lsp_message() {
 #[tokio::test]
 async fn test_lsp_content_length_edge_cases() {
     // Test with exact boundaries
+    let small_content = "{}";
+    let medium_content = r#"{"key":1}"#;
     let large_content = "x".repeat(100);
+
     let test_cases = vec![
-        (1, "{}"),
-        (10, r#"{"key":1}"#),
-        (100, large_content.as_str()),
+        (2, small_content),           // "{}" is 2 bytes
+        (9, medium_content),          // {"key":1} is 9 bytes
+        (100, large_content.as_str()), // "xxx..." is 100 bytes
     ];
 
     for (expected_len, content) in test_cases {
         let actual_len = content.len();
-        assert!(actual_len <= expected_len, "Content too large");
+        assert_eq!(actual_len, expected_len,
+            "Content length mismatch: expected {}, got {} for '{}'",
+            expected_len, actual_len,
+            if content.len() > 20 { &content[..20] } else { content }
+        );
     }
 }

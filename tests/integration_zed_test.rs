@@ -133,7 +133,7 @@ impl ZedLspClient {
             "--log-level=info".to_string(),
             format!("--mcp-pre={}", mcp_url),
             "--mcp-timeout=3000".to_string(),
-            "--mcp-cache=true".to_string(),
+            "--mcp-cache".to_string(),
             "--max-concurrent=200".to_string(),
         ];
 

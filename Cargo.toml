@@ -68,6 +68,8 @@ tree-sitter-c-sharp = { git = "https://github.com/tree-sitter/tree-sitter-c-shar
 # DevOps & Infrastructure
 # Configuration parsing
 toml = "0.8"
+async-trait = "0.1.89"
+thiserror = "2.0.17"
 
 [dev-dependencies]
 tokio-test = "0.4"

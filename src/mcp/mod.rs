@@ -4,145 +4,147 @@
 //! MCP is a protocol for communication between AI models and external context providers.
 //!
 //! ## Features
-//! - Connect to MCP servers via HTTP
+//! - Connect to MCP servers via Stdio, HTTP, or WebSocket
 //! - Query context from external sources
 //! - Provide codebase context to AI models
 //! - Timeout handling with configurable duration
+//! - Tool registry for extensible MCP tool support
 //!
 //! ## Usage
 //! ```rust,ignore
-//! use universal_lsp::mcp::McpClient;
+//! use universal_lsp::mcp::{McpClient, McpConfig};
+//! use universal_lsp::mcp::protocol::{TransportType, McpRequest, Position};
 //!
-//! let client = McpClient::new("http://localhost:3000");
-//! let context = client.query(&request).await?;
+//! // HTTP transport
+//! let config = McpConfig {
+//!     server_url: "http://localhost:3000".to_string(),
+//!     transport: TransportType::Http,
+//!     timeout_ms: 5000,
+//! };
+//! let client = McpClient::new(config);
+//!
+//! // Stdio transport (for subprocess-based MCP servers)
+//! let client = McpClient::new_stdio("smart-tree", vec![], 5000)?;
+//!
+//! // Query for context
+//! let request = McpRequest {
+//!     request_type: "completion".to_string(),
+//!     uri: "file:///test.rs".to_string(),
+//!     position: Position { line: 10, character: 5 },
+//!     context: Some("fn main() {".to_string()),
+//! };
+//! let response = client.query(&request).await?;
 //! ```
 
-use anyhow::{Result, Context as AnyhowContext};
-use serde::{Deserialize, Serialize};
+// Re-export public types
+pub mod error;
+pub mod protocol;
+pub mod transport;
+
+pub use error::{McpError, McpResult};
+pub use protocol::{
+    JsonRpcRequest, JsonRpcResponse, McpConfig, McpRequest, McpResponse,
+    Position, TransportType,
+};
+pub use transport::{HttpTransport, McpTransport};
+
 use std::time::Duration;
+use transport::stdio::StdioTransport;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpConfig {
-    pub server_url: String,
-    pub transport: TransportType,
-    pub timeout_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TransportType {
-    Stdio,
-    Http,
-    WebSocket,
-}
-
-/// MCP Request structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpRequest {
-    /// Type of request (completion, hover, definition, etc.)
-    pub request_type: String,
-    /// File path or URI
-    pub uri: String,
-    /// Cursor position
-    pub position: Position,
-    /// Surrounding context (e.g., current function, class)
-    pub context: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Position {
-    pub line: u32,
-    pub character: u32,
-}
-
-/// MCP Response structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpResponse {
-    /// Enhanced suggestions from MCP server
-    pub suggestions: Vec<String>,
-    /// Additional context or documentation
-    pub documentation: Option<String>,
-    /// Confidence score (0.0 - 1.0)
-    pub confidence: Option<f32>,
-}
-
-#[derive(Debug)]
+/// MCP Client with unified transport interface
 pub struct McpClient {
-    config: McpConfig,
-    http_client: reqwest::Client,
+    transport: tokio::sync::Mutex<Box<dyn McpTransport>>,
 }
 
 impl McpClient {
     /// Create a new MCP client with the given configuration
     pub fn new(config: McpConfig) -> Self {
-        let http_client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(config.timeout_ms))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        let transport: Box<dyn McpTransport> = match config.transport {
+            TransportType::Http => {
+                Box::new(HttpTransport::new(
+                    config.server_url.clone(),
+                    Duration::from_millis(config.timeout_ms),
+                ))
+            }
+            TransportType::Stdio => {
+                // For Stdio, server_url contains command and args separated by space
+                let parts: Vec<String> = config.server_url
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                let command = parts.first().cloned().unwrap_or_default();
+                let args = parts.into_iter().skip(1).collect();
 
-        Self { config, http_client }
+                Box::new(StdioTransport::new(
+                    command,
+                    args,
+                    Duration::from_millis(config.timeout_ms),
+                ))
+            }
+            TransportType::WebSocket => {
+                Box::new(transport::websocket::WebSocketTransport::new(
+                    config.server_url.clone(),
+                ))
+            }
+        };
+
+        Self {
+            transport: tokio::sync::Mutex::new(transport),
+        }
+    }
+
+    /// Create a new MCP client with Stdio transport (convenience constructor)
+    pub fn new_stdio(command: impl Into<String>, args: Vec<String>, timeout_ms: u64) -> Self {
+        let transport = Box::new(StdioTransport::new(
+            command.into(),
+            args,
+            Duration::from_millis(timeout_ms),
+        ));
+
+        Self {
+            transport: tokio::sync::Mutex::new(transport),
+        }
+    }
+
+    /// Create a new MCP client with HTTP transport (convenience constructor)
+    pub fn new_http(server_url: impl Into<String>, timeout_ms: u64) -> Self {
+        let transport = Box::new(HttpTransport::new(
+            server_url.into(),
+            Duration::from_millis(timeout_ms),
+        ));
+
+        Self {
+            transport: tokio::sync::Mutex::new(transport),
+        }
     }
 
     /// Query MCP server with a request
-    pub async fn query(&self, request: &McpRequest) -> Result<McpResponse> {
-        match self.config.transport {
-            TransportType::Http => self.query_http(request).await,
-            TransportType::Stdio => {
-                // TODO: Implement stdio transport
-                Err(anyhow::anyhow!("Stdio transport not yet implemented"))
-            }
-            TransportType::WebSocket => {
-                // TODO: Implement WebSocket transport
-                Err(anyhow::anyhow!("WebSocket transport not yet implemented"))
-            }
-        }
-    }
+    pub async fn query(&self, request: &McpRequest) -> McpResult<McpResponse> {
+        // Convert application-level McpRequest to JSON-RPC request
+        let json_rpc_request = JsonRpcRequest::new(
+            "query",
+            Some(serde_json::to_value(request)?),
+        );
 
-    /// Query via HTTP
-    async fn query_http(&self, request: &McpRequest) -> Result<McpResponse> {
-        let response = self
-            .http_client
-            .post(&self.config.server_url)
-            .json(request)
-            .send()
-            .await
-            .context("Failed to send MCP request")?;
+        let mut transport = self.transport.lock().await;
+        let response = transport.send_request(json_rpc_request).await?;
 
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "MCP server returned error status: {}",
-                response.status()
-            ));
-        }
+        // Extract result from JSON-RPC response
+        let result = response.result.ok_or_else(|| {
+            McpError::Protocol("Missing result in response".to_string())
+        })?;
 
-        let mcp_response: McpResponse = response
-            .json()
-            .await
-            .context("Failed to parse MCP response")?;
-
+        let mcp_response: McpResponse = serde_json::from_value(result)?;
         Ok(mcp_response)
     }
 
     /// Check if MCP server is available
     pub async fn is_available(&self) -> bool {
-        match self.config.transport {
-            TransportType::Http => self.check_http_health().await,
-            _ => false,
-        }
-    }
-
-    /// HTTP health check
-    async fn check_http_health(&self) -> bool {
-        let health_url = format!("{}/health", self.config.server_url);
-        self.http_client
-            .get(&health_url)
-            .send()
-            .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+        self.transport.lock().await.is_available().await
     }
 
     /// Get context from MCP server (convenience method)
-    pub async fn get_context(&self, query: &str) -> Result<String> {
+    pub async fn get_context(&self, query: &str) -> McpResult<String> {
         let request = McpRequest {
             request_type: "context".to_string(),
             uri: String::new(),
@@ -153,15 +155,10 @@ impl McpClient {
         let response = self.query(&request).await?;
         Ok(response.suggestions.join("\n"))
     }
-}
 
-impl Default for McpConfig {
-    fn default() -> Self {
-        Self {
-            server_url: "http://localhost:3000".to_string(),
-            transport: TransportType::Http,
-            timeout_ms: 5000,
-        }
+    /// Close the MCP client and clean up resources
+    pub async fn close(self) -> McpResult<()> {
+        self.transport.lock().await.close().await
     }
 }
 
@@ -170,16 +167,21 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_mcp_client_creation() {
-        let config = McpConfig::default();
-        let client = McpClient::new(config);
+    async fn test_mcp_client_http_creation() {
+        let client = McpClient::new_http("http://localhost:3000", 5000);
+        assert!(!client.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn test_mcp_client_stdio_creation() {
+        let client = McpClient::new_stdio("echo", vec!["test".to_string()], 5000);
+        // Stdio transport won't be available until started
         assert!(!client.is_available().await);
     }
 
     #[tokio::test]
     async fn test_get_context_placeholder() {
-        let config = McpConfig::default();
-        let client = McpClient::new(config);
+        let mut client = McpClient::new_http("http://localhost:3000", 5000);
         // This should fail since there's no actual MCP server running
         let result = client.get_context("test query").await;
         assert!(result.is_err(), "Expected error when no MCP server is available");
