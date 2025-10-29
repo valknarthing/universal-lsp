@@ -2,8 +2,14 @@
 
 A standalone Language Server Protocol (LSP) implementation supporting **242+ programming languages** with intelligent code analysis, AI-powered features via Model Context Protocol (MCP), and room for extensive IDE capabilities.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-ff69b4.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![Version](https://img.shields.io/badge/version-0.1.0-ff69b4.svg)]()
+[![Documentation](https://img.shields.io/badge/docs-rustdoc-ff69b4.svg)](https://valknarthing.github.io/universal-lsp/)
+[![Tree-sitter](https://img.shields.io/badge/tree--sitter-242+%20languages-ff69b4.svg)]()
+[![AI Powered](https://img.shields.io/badge/AI-Claude%20%2B%20Copilot-ff69b4.svg)]()
+[![MCP](https://img.shields.io/badge/MCP-15+%20servers-ff69b4.svg)]()
+[![ACP](https://img.shields.io/badge/ACP-Agent%20Client%20Protocol-ff69b4.svg)]()
 
 ## Features
 

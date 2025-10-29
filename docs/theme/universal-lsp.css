@@ -1,0 +1,426 @@
+/* Universal LSP Custom Theme - Slate/Navy/Pink */
+/* Color Palette: Slate (#2f3542), Navy (#1e272e), Pink (#ff69b4) */
+
+:root {
+    /* Main colors */
+    --main-background-color: #2f3542;
+    --main-color: #e8eaed;
+    --settings-input-color: #e8eaed;
+    --settings-input-border-color: #57606f;
+    --settings-button-color: #ff69b4;
+    --settings-button-border-focus: #ff1493;
+
+    /* Links */
+    --link-color: #ff69b4;
+    --code-highlight-kw-color: #ff69b4;
+    --code-highlight-kw-2-color: #ff1493;
+
+    /* Sidebar */
+    --sidebar-background-color: #1e272e;
+    --sidebar-background-color-hover: #24272e;
+    --sidebar-elems-color: #e8eaed;
+
+    /* Search */
+    --search-input-focused-border-color: #ff69b4;
+    --search-results-alias-color: #ff69b4;
+    --search-results-grey-color: #747d8c;
+    --search-tab-title-count-color: #ff69b4;
+
+    /* Code blocks */
+    --code-block-background-color: #1e272e;
+    --codeblock-error-hover-color: rgba(255, 105, 180, 0.1);
+    --codeblock-error-color: rgba(255, 20, 147, 0.8);
+
+    /* Scrollbar */
+    --scrollbar-track-background-color: #1e272e;
+    --scrollbar-thumb-background-color: #ff69b4;
+    --scrollbar-color: #ff69b4 #1e272e;
+
+    /* Headings */
+    --heading-color: #ff69b4;
+    --title-color: #ff69b4;
+    --subtitle-color: #ff1493;
+
+    /* Borders and separators */
+    --border-color: #57606f;
+    --table-border-color: #57606f;
+    --table-head-background-color: #1e272e;
+
+    /* Tables */
+    --tr-even-background-color: #24272e;
+    --tr-odd-background-color: #2f3542;
+
+    /* Quotes */
+    --quote-color: #747d8c;
+    --quote-border-color: #ff69b4;
+
+    /* Type system colors */
+    --type-link-color: #ff69b4;
+    --trait-link-color: #ff1493;
+    --assoc-item-link-color: #ec407a;
+    --fn-link-color: #ff69b4;
+    --macro-link-color: #f06292;
+    --keyword-link-color: #ff69b4;
+
+    /* Documentation specific */
+    --docblock-table-border-color: #57606f;
+    --docblock-code-background-color: #1e272e;
+
+    /* Mobile menu */
+    --mobile-sidebar-menu-filter: none;
+    --mobile-sidebar-menu-hover-filter: brightness(1.2);
+
+    /* Source code view */
+    --src-line-numbers-span-color: #57606f;
+    --src-line-number-highlighted-background-color: rgba(255, 105, 180, 0.1);
+
+    /* Item table */
+    --item-table-header-background-color: #1e272e;
+    --item-table-header-border-color: #57606f;
+
+    /* Scraped example */
+    --scraped-example-title-color: #ff69b4;
+    --scraped-example-help-border-color: #57606f;
+    --scraped-example-help-color: #e8eaed;
+    --scraped-example-help-hover-border-color: #ff69b4;
+    --scraped-example-help-hover-color: #ffffff;
+    --scraped-example-code-line-highlight: rgba(255, 105, 180, 0.1);
+    --scraped-example-code-line-highlight-focus: rgba(255, 105, 180, 0.2);
+
+    /* Scrape example (rustdoc uses both "scrape" and "scraped" variants) */
+    --scrape-example-code-line-highlight: rgba(255, 105, 180, 0.1);
+    --scrape-example-code-line-highlight-focus: rgba(255, 105, 180, 0.2);
+    --scrape-example-help-border-color: #57606f;
+    --scrape-example-help-color: #e8eaed;
+    --scrape-example-help-hover-border-color: #ff69b4;
+    --scrape-example-help-hover-color: #ffffff;
+
+    /* Toggle */
+    --toggle-filter: brightness(0.8);
+
+    /* Notice box */
+    --notable-trait-tooltip-background-color: #1e272e;
+    --notable-trait-tooltip-border-color: #ff69b4;
+
+    /* Copy button */
+    --copy-button-color: #e8eaed;
+    --copy-button-background-color: #1e272e;
+    --copy-button-hover-color: #ffffff;
+    --copy-button-hover-background-color: #24272e;
+    --copy-button-border-color: #57606f;
+
+    /* Missing required variables for rustdoc validation */
+    --sidebar-border-color: #57606f;
+    --headings-border-bottom-color: #ff69b4;
+    --button-background-color: #1e272e;
+    --button-border-color: #57606f;
+    --right-side-color: #e8eaed;
+
+    /* Code syntax highlighting */
+    --code-attribute-color: #ff69b4;
+    --code-highlight-kw-3-color: #ec407a;
+    --code-highlight-lifetime-color: #f06292;
+    --code-highlight-prelude-color: #ff69b4;
+    --code-highlight-prelude-val-color: #ff1493;
+    --code-highlight-number-color: #f06292;
+    --code-highlight-string-color: #ec407a;
+    --code-highlight-literal-color: #ff69b4;
+    --code-highlight-attribute-color: #ff69b4;
+    --code-highlight-self-color: #ff1493;
+    --code-highlight-macro-color: #f06292;
+    --code-highlight-question-mark-color: #ff69b4;
+    --code-highlight-comment-color: #747d8c;
+    --code-highlight-doc-comment-color: #747d8c;
+
+    /* Search */
+    --search-input-border-color: #57606f;
+    --search-background-color: #2f3542;
+    --search-color: #e8eaed;
+    --search-error-code-background-color: #1e272e;
+    --search-results-border-color: #57606f;
+    --search-tab-button-not-selected-border-top-color: #57606f;
+    --search-tab-button-not-selected-background: #24272e;
+    --search-tab-button-selected-border-top-color: #ff69b4;
+    --search-tab-button-selected-background: #2f3542;
+
+    /* Stability badges */
+    --stab-background-color: #1e272e;
+    --stab-code-color: #e8eaed;
+    --stab-unstable-background-color: rgba(255, 105, 180, 0.2);
+    --stab-unstable-code-color: #ff69b4;
+    --stab-deprecated-background-color: rgba(255, 69, 0, 0.2);
+    --stab-deprecated-code-color: #ff4500;
+    --stab-portability-background-color: rgba(116, 125, 140, 0.2);
+    --stab-portability-code-color: #747d8c;
+
+    /* Keyboard shortcuts */
+    --kbd-color: #e8eaed;
+    --kbd-background: #1e272e;
+    --kbd-box-shadow-color: #57606f;
+
+    /* Additional UI elements */
+    --rust-logo-filter: brightness(0) saturate(100%) invert(75%) sepia(100%) saturate(1000%) hue-rotate(290deg) brightness(100%) contrast(100%);
+    --crate-search-div-filter: invert(100%);
+    --crate-search-div-hover-filter: invert(100%);
+    --crate-search-hover-border: #ff69b4;
+    --src-sidebar-background-selected: rgba(255, 105, 180, 0.15);
+    --src-sidebar-background-hover: rgba(255, 105, 180, 0.1);
+    --table-alt-row-background-color: #24272e;
+    --code-example-button-color: #e8eaed;
+    --code-example-button-background-color: #1e272e;
+    --code-example-button-hover-background-color: #24272e;
+
+    /* Target highlighting */
+    --target-background-color: rgba(255, 105, 180, 0.1);
+    --target-border-color: #ff69b4;
+
+    /* Help popups and modals */
+    --help-border-color: #57606f;
+    --help-background-color: #2f3542;
+    --help-color: #e8eaed;
+
+    /* Settings menu */
+    --settings-menu-filter: brightness(0.9);
+    --settings-menu-hover-background-color: rgba(255, 105, 180, 0.1);
+
+    /* Expansion arrows and toggles */
+    --toggle-plus-minus-background-color: rgba(255, 105, 180, 0.1);
+
+    /* Documentation warnings and notes */
+    --warning-border-color: #f59e0b;
+    --warning-background-color: rgba(245, 158, 11, 0.1);
+    --note-background-color: rgba(59, 130, 246, 0.1);
+    --note-border-color: #3b82f6;
+
+    /* Code block controls */
+    --codeblock-link-background: #1e272e;
+    --codeblock-link-hover-background: #24272e;
+
+    /* Additional missing variables for full rustdoc compatibility */
+    --toggles-color: #e8eaed;
+    --copy-path-button-color: #e8eaed;
+    --copy-path-img-filter: brightness(0.9);
+    --copy-path-img-hover-filter: brightness(1.1);
+    --code-example-button-hover-color: #ffffff;
+    --settings-menu-hover-filter: brightness(1.1);
+    --codeblock-ignore-hover-color: #ffffff;
+    --codeblock-ignore-color: #e8eaed;
+
+    /* Type and module links */
+    --function-link-color: #ff69b4;
+    --mod-link-color: #ff1493;
+    --sidebar-link-color: #e8eaed;
+    --sidebar-current-link-background-color: rgba(255, 105, 180, 0.15);
+
+    /* Search results */
+    --search-result-link-focus-background-color: rgba(255, 105, 180, 0.1);
+    --search-result-border-color: #57606f;
+
+    /* Scraped example additional variables */
+    --scrape-example-toggle-line-background: rgba(255, 105, 180, 0.05);
+    --scrape-example-toggle-line-hover-background: rgba(255, 105, 180, 0.1);
+    --scrape-example-code-wrapper-background-start: rgba(30, 39, 46, 0.9);
+    --scrape-example-code-wrapper-background-end: rgba(30, 39, 46, 0.6);
+
+    /* Sidebar resizer */
+    --sidebar-resizer-hover: #ff69b4;
+    --sidebar-resizer-active: #ff1493;
+}
+
+/* Enhanced heading styles with pink gradient */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--heading-color);
+    font-weight: 600;
+    border-bottom: 2px solid var(--link-color);
+    padding-bottom: 0.3em;
+    margin-top: 1.5em;
+    margin-bottom: 0.8em;
+}
+
+h1 {
+    font-size: 2.2em;
+    background: linear-gradient(135deg, #ff69b4 0%, #ff1493 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Code blocks with enhanced navy background */
+pre, code {
+    background-color: var(--code-block-background-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+}
+
+pre {
+    padding: 1em;
+    overflow-x: auto;
+}
+
+code {
+    padding: 0.2em 0.4em;
+}
+
+/* Pink scrollbars with smooth transitions */
+::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+::-webkit-scrollbar-track {
+    background-color: var(--scrollbar-track-background-color);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb-background-color);
+    border-radius: 10px;
+    border: 2px solid var(--scrollbar-track-background-color);
+    transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: #ff1493;
+}
+
+/* Search results with pink highlights */
+.search-results a {
+    transition: all 0.2s ease;
+}
+
+.search-results a:hover {
+    background-color: rgba(255, 105, 180, 0.1);
+    border-left: 4px solid var(--link-color);
+    padding-left: 1em;
+}
+
+/* Enhanced links with pink accents */
+a {
+    color: var(--link-color);
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+a:hover {
+    color: #ff1493;
+    text-decoration: underline;
+}
+
+/* Tables with alternating slate/navy rows */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+table thead {
+    background-color: var(--table-head-background-color);
+    color: var(--heading-color);
+    font-weight: 600;
+}
+
+table th, table td {
+    border: 1px solid var(--table-border-color);
+    padding: 0.8em;
+    text-align: left;
+}
+
+table tr:nth-child(even) {
+    background-color: var(--tr-even-background-color);
+}
+
+table tr:nth-child(odd) {
+    background-color: var(--tr-odd-background-color);
+}
+
+table tr:hover {
+    background-color: rgba(255, 105, 180, 0.05);
+}
+
+/* Blockquotes with pink left border */
+blockquote {
+    border-left: 4px solid var(--quote-border-color);
+    padding-left: 1em;
+    margin-left: 0;
+    color: var(--quote-color);
+    font-style: italic;
+}
+
+/* Enhanced sidebar */
+.sidebar {
+    background-color: var(--sidebar-background-color);
+    border-right: 2px solid var(--border-color);
+}
+
+.sidebar-elems a {
+    color: var(--sidebar-elems-color);
+    transition: all 0.2s ease;
+}
+
+.sidebar-elems a:hover {
+    background-color: var(--sidebar-background-color-hover);
+    color: var(--link-color);
+    border-left: 3px solid var(--link-color);
+    padding-left: 0.7em;
+}
+
+/* Documentation badges and tags */
+.stability {
+    border-radius: 4px;
+    padding: 0.2em 0.6em;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+.stability.unstable {
+    background-color: rgba(255, 105, 180, 0.2);
+    color: #ff69b4;
+    border: 1px solid #ff69b4;
+}
+
+.stability.stable {
+    background-color: rgba(76, 175, 80, 0.2);
+    color: #4caf50;
+    border: 1px solid #4caf50;
+}
+
+/* Source code line numbers */
+.src-line-numbers {
+    color: var(--src-line-numbers-span-color);
+    user-select: none;
+}
+
+.src-line-numbers span.line-highlighted {
+    background-color: var(--src-line-number-highlighted-background-color);
+    border-left: 3px solid var(--link-color);
+}
+
+/* Mobile responsiveness */
+@media (max-width: 700px) {
+    h1 {
+        font-size: 1.8em;
+    }
+
+    table {
+        font-size: 0.9em;
+    }
+
+    pre {
+        padding: 0.5em;
+        font-size: 0.85em;
+    }
+}
+
+/* Print styles */
+@media print {
+    * {
+        background-color: white !important;
+        color: black !important;
+    }
+
+    a {
+        color: #0066cc !important;
+        text-decoration: underline !important;
+    }
+}
