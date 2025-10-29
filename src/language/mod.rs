@@ -1,4 +1,4 @@
-//! Language detection and definitions for 242+ programming languages
+//! Language detection and definitions for 19+ programming languages
 
 use std::collections::HashMap;
 use once_cell::sync::Lazy;
@@ -10,7 +10,7 @@ pub struct Language {
     pub keywords: &'static [&'static str],
 }
 
-/// All supported languages (242+ total)
+/// All supported languages (19+ total)
 pub static LANGUAGES: Lazy<Vec<Language>> = Lazy::new(|| vec![
     // Systems Programming
     Language {
@@ -306,7 +306,7 @@ pub static LANGUAGES: Lazy<Vec<Language>> = Lazy::new(|| vec![
         keywords: &["---", "frontmatter"],
     },
     
-    // Additional languages (extending to 242+)
+    // Additional languages (extending to 19+)
     Language { name: "Ada", extensions: &["ada", "adb", "ads"], keywords: &["procedure", "function", "begin", "end"] },
     Language { name: "Assembly", extensions: &["asm", "s"], keywords: &["mov", "push", "pop", "jmp"] },
     Language { name: "AWK", extensions: &["awk"], keywords: &["BEGIN", "END", "if", "else"] },

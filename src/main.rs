@@ -1,5 +1,5 @@
 //! Universal LSP Server - Main Entry Point
-//! Supports 242+ programming languages with AI-powered intelligent code analysis
+//! Supports 19+ programming languages with AI-powered intelligent code analysis
 //!
 //! Multi-command CLI:
 //! - `ulsp` or `ulsp lsp` - Start LSP server (default mode)
@@ -214,30 +214,63 @@ impl LanguageServer for UniversalLsp {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let lang = detect_language(uri.path());
+        let lang_lowercase = lang.to_lowercase(); // Normalize for tree-sitter lookup
 
+        tracing::debug!("Hover requested for {} at {}:{}", uri, position.line, position.character);
         let mut hover_text = format!("Language: {}", lang);
 
         // Try tree-sitter symbol extraction at cursor position
         if let Some(content) = self.documents.get(uri.as_str()) {
-            if let Ok(mut parser) = TreeSitterParser::new() {
-                if parser.set_language(lang).is_ok() {
-                    if let Ok(tree) = parser.parse(&content, uri.as_str()) {
-                        // Find node at position
-                        let byte_offset = position_to_byte(&content, position);
-                        if let Some(node) = tree.root_node().descendant_for_byte_range(byte_offset, byte_offset) {
-                            // Get symbol info
-                            let node_text = &content[node.byte_range()];
-                            let kind = node.kind();
+            tracing::debug!("Document found, content length: {}", content.len());
 
-                            hover_text = format!(
-                                "{}\n\nSymbol: {}\nType: {}\nPosition: {}:{}",
-                                hover_text, node_text, kind,
-                                position.line, position.character
-                            );
+            match TreeSitterParser::new() {
+                Ok(mut parser) => {
+                    tracing::debug!("TreeSitterParser created successfully");
+
+                    match parser.set_language(&lang_lowercase) {
+                        Ok(_) => {
+                            tracing::debug!("Language '{}' set successfully", lang);
+
+                            match parser.parse(&content, uri.as_str()) {
+                                Ok(tree) => {
+                                    tracing::debug!("Parsing successful");
+
+                                    // Find node at position
+                                    let byte_offset = position_to_byte(&content, position);
+                                    tracing::debug!("Byte offset: {}", byte_offset);
+
+                                    if let Some(node) = tree.root_node().descendant_for_byte_range(byte_offset, byte_offset) {
+                                        // Get symbol info
+                                        let node_text = &content[node.byte_range()];
+                                        let kind = node.kind();
+
+                                        tracing::debug!("Found node: text='{}', kind='{}'", node_text, kind);
+
+                                        hover_text = format!(
+                                            "{}\n\nSymbol: {}\nType: {}\nPosition: {}:{}",
+                                            hover_text, node_text, kind,
+                                            position.line, position.character
+                                        );
+                                    } else {
+                                        tracing::debug!("No node found at byte offset {}", byte_offset);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::debug!("Failed to parse: {:?}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!("Failed to set language '{}': {:?}", lang, e);
                         }
                     }
                 }
+                Err(e) => {
+                    tracing::debug!("Failed to create TreeSitterParser: {:?}", e);
+                }
             }
+        } else {
+            tracing::debug!("Document not found in cache: {}", uri.as_str());
         }
 
         // Query MCP servers via Coordinator for rich hover information
@@ -466,11 +499,12 @@ impl LanguageServer for UniversalLsp {
         }
 
         // Try tree-sitter symbol-based completions
+        let lang_lowercase = lang.to_lowercase();
         if let Some(content) = self.documents.get(uri.as_str()) {
             if let Ok(mut parser) = TreeSitterParser::new() {
-                if parser.set_language(lang).is_ok() {
+                if parser.set_language(&lang_lowercase).is_ok() {
                     if let Ok(tree) = parser.parse(&content, uri.as_str()) {
-                        if let Ok(symbols) = parser.extract_symbols(&tree, &content, lang) {
+                        if let Ok(symbols) = parser.extract_symbols(&tree, &content, &lang_lowercase) {
                             for symbol in symbols {
                                 let completion_kind = match symbol.kind {
                                     SymbolKind::FUNCTION | SymbolKind::METHOD => CompletionItemKind::FUNCTION,
@@ -572,14 +606,15 @@ impl LanguageServer for UniversalLsp {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let lang = detect_language(uri.path());
+        let lang_lowercase = lang.to_lowercase();
 
         if let Some(content) = self.documents.get(uri.as_str()) {
             let Ok(mut parser) = TreeSitterParser::new() else {
                 return Ok(None);
             };
-            if parser.set_language(lang).is_ok() {
+            if parser.set_language(&lang_lowercase).is_ok() {
                 if let Ok(tree) = parser.parse(&content, uri.as_str()) {
-                    if let Ok(Some(def)) = parser.find_definition(&tree, &content, position, lang) {
+                    if let Ok(Some(def)) = parser.find_definition(&tree, &content, position, &lang_lowercase) {
                         return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                             uri: uri.clone(),
                             range: def.range,
@@ -596,14 +631,15 @@ impl LanguageServer for UniversalLsp {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let lang = detect_language(uri.path());
+        let lang_lowercase = lang.to_lowercase();
 
         if let Some(content) = self.documents.get(uri.as_str()) {
             let Ok(mut parser) = TreeSitterParser::new() else {
                 return Ok(None);
             };
-            if parser.set_language(lang).is_ok() {
+            if parser.set_language(&lang_lowercase).is_ok() {
                 if let Ok(tree) = parser.parse(&content, uri.as_str()) {
-                    if let Ok(refs) = parser.find_references(&tree, &content, position, lang) {
+                    if let Ok(refs) = parser.find_references(&tree, &content, position, &lang_lowercase) {
                         let locations: Vec<Location> = refs
                             .into_iter()
                             .map(|r| Location {
@@ -626,14 +662,15 @@ impl LanguageServer for UniversalLsp {
     ) -> Result<Option<DocumentSymbolResponse>> {
         let uri = &params.text_document.uri;
         let lang = detect_language(uri.path());
+        let lang_lowercase = lang.to_lowercase();
 
         if let Some(content) = self.documents.get(uri.as_str()) {
             let Ok(mut parser) = TreeSitterParser::new() else {
                 return Ok(None);
             };
-            if parser.set_language(lang).is_ok() {
+            if parser.set_language(&lang_lowercase).is_ok() {
                 if let Ok(tree) = parser.parse(&content, uri.as_str()) {
-                    if let Ok(symbols) = parser.extract_symbols(&tree, &content, lang) {
+                    if let Ok(symbols) = parser.extract_symbols(&tree, &content, &lang_lowercase) {
                         let doc_symbols: Vec<DocumentSymbol> = symbols
                             .into_iter()
                             .map(|s| DocumentSymbol {
@@ -871,7 +908,6 @@ async fn run_zed_init(
 
     // Build comprehensive settings
     let mut settings = json!({
-        "name": project_name,
         "language_servers": {
             "universal-lsp": {
                 "command": "universal-lsp",
@@ -884,6 +920,31 @@ async fn run_zed_init(
                     "enable_hover": true,
                     "enable_completion": true,
                     "enable_diagnostics": true
+                }
+            },
+            "vtsls": {
+                "initialization_options": {
+                    "enabled": false
+                }
+            },
+            "eslint": {
+                "initialization_options": {
+                    "enabled": false
+                }
+            },
+            "rust-analyzer": {
+                "initialization_options": {
+                    "enabled": false
+                }
+            },
+            "pyright": {
+                "initialization_options": {
+                    "enabled": false
+                }
+            },
+            "pylsp": {
+                "initialization_options": {
+                    "enabled": false
                 }
             }
         },

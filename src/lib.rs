@@ -3,10 +3,10 @@
 //! ![Universal LSP Banner](https://img.shields.io/badge/Universal%20LSP-v0.1.0-ff69b4?style=for-the-badge&logo=rust)
 //!
 //! **Universal LSP** is a sophisticated, AI-powered Language Server Protocol implementation
-//! supporting 242+ programming languages with advanced features including MCP (Model Context Protocol)
+//! supporting 19+ programming languages with advanced features including MCP (Model Context Protocol)
 //! integration, ACP (Agent Client Protocol) capabilities, and intelligent code completion.
 //!
-//! ## 📚 Table of Contents
+//! ## Table of Contents
 //!
 //! - [Features](#features)
 //! - [Architecture](#architecture)
@@ -16,11 +16,11 @@
 //! - [Configuration](#configuration)
 //! - [Performance](#performance)
 //!
-//! ## ✨ Features
+//! ## Features
 //!
 //! ### Core LSP Features
 //!
-//! - **242+ Language Support**: Comprehensive language coverage using Tree-sitter grammars
+//! - **19+ Language Support**: Comprehensive language coverage using Tree-sitter grammars
 //! - **Intelligent Completions**: Multi-tier completion system with AI integration
 //! - **Real-time Diagnostics**: Advanced error detection and suggestions
 //! - **Code Actions**: Automated fixes and refactorings
@@ -41,64 +41,70 @@
 //! - **LSP Proxy**: Route between multiple language servers
 //! - **Multi-Server Orchestration**: Coordinate multiple backend servers
 //!
-//! ## 🏗️ Architecture
+//! ## Architecture
 //!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────────┐
-//! │                         Editor / IDE                             │
-//! │  (VSCode, Zed, Neovim, Emacs, Sublime Text, IntelliJ, etc.)    │
-//! └──────────────────┬──────────────────────────────────────────────┘
-//!                    │ LSP Protocol
-//!                    ▼
-//! ┌─────────────────────────────────────────────────────────────────┐
-//! │                    Universal LSP Core                            │
-//! │  ┌──────────────┬─────────────┬──────────────┬──────────────┐  │
-//! │  │ Text Sync    │ Diagnostics │ Completions  │ Code Actions │  │
-//! │  └──────────────┴─────────────┴──────────────┴──────────────┘  │
-//! └──────┬──────────────────┬─────────────────────┬────────────────┘
-//!        │                  │                     │
-//!        ▼                  ▼                     ▼
-//! ┌──────────────┐   ┌─────────────┐    ┌────────────────┐
-//! │  Tree-sitter │   │ AI Provider │    │ MCP Coordinator│
-//! │   Parsers    │   │  (Claude)   │    │  Integration   │
-//! │   242+ lang  │   │  (Copilot)  │    │   15+ servers  │
-//! └──────────────┘   └─────────────┘    └────────────────┘
-//!        │                  │                     │
-//!        └──────────────────┴─────────────────────┘
-//!                           │
-//!                           ▼
-//!                  ┌──────────────────┐
-//!                  │  ACP Agent Core  │
-//!                  │  Editor ↔ AI     │
-//!                  └──────────────────┘
+//! ```mermaid
+//! flowchart TD
+//!     A[Editor / IDE<br/>VSCode, Zed, Neovim, Emacs, etc.] -->|LSP Protocol| B[Universal LSP Core]
+//!     B --> C[Text Sync]
+//!     B --> D[Diagnostics]
+//!     B --> E[Completions]
+//!     B --> F[Code Actions]
+//!
+//!     C --> G[Tree-sitter Parsers<br/>19+ languages]
+//!     D --> G
+//!     E --> G
+//!     F --> G
+//!
+//!     C --> H[AI Provider<br/>Claude / Copilot]
+//!     E --> H
+//!
+//!     C --> I[MCP Coordinator<br/>15+ servers]
+//!     E --> I
+//!
+//!     G --> J[ACP Agent Core<br/>Editor ↔ AI]
+//!     H --> J
+//!     I --> J
+//!
+//!     style A fill:#ff69b4,stroke:#ff1493,color:#fff
+//!     style B fill:#2f3542,stroke:#ff69b4,color:#fff
+//!     style J fill:#1e272e,stroke:#ff69b4,color:#fff
 //! ```
 //!
 //! ### Data Flow Diagram
 //!
-//! ```text
-//! Editor Request
-//!      │
-//!      ├─► Text Sync ────► Document State
-//!      │                        │
-//!      ├─► Completion ──────────┼─► Tree-sitter Parse
-//!      │        │               │         │
-//!      │        │               │         ├─► Local Symbols
-//!      │        │               │         └─► Syntax Context
-//!      │        │               │
-//!      │        └───────────────┼─► AI Provider (Claude/Copilot)
-//!      │                        │         │
-//!      │                        │         └─► Context-aware suggestions
-//!      │                        │
-//!      ├─► Diagnostics ─────────┼─► Grammar Validation
-//!      │                        │         │
-//!      │                        │         └─► Error Detection
-//!      │                        │
-//!      └─► Code Action ─────────┴─► Quick Fixes & Refactorings
-//!                                         │
-//!                                         └─► Response to Editor
+//! ```mermaid
+//! flowchart LR
+//!     A[Editor Request] --> B[Text Sync]
+//!     A --> C[Completion]
+//!     A --> D[Diagnostics]
+//!     A --> E[Code Action]
+//!
+//!     B --> F[Document State]
+//!
+//!     C --> G[Tree-sitter Parse]
+//!     G --> H[Local Symbols]
+//!     G --> I[Syntax Context]
+//!
+//!     C --> J[AI Provider<br/>Claude/Copilot]
+//!     J --> K[Context-aware<br/>suggestions]
+//!
+//!     D --> L[Grammar Validation]
+//!     D --> M[Error Detection]
+//!
+//!     E --> N[Quick Fixes &<br/>Refactorings]
+//!
+//!     F --> O[Response to Editor]
+//!     K --> O
+//!     M --> O
+//!     N --> O
+//!
+//!     style A fill:#ff69b4,stroke:#ff1493,color:#fff
+//!     style O fill:#2f3542,stroke:#ff69b4,color:#fff
+//!     style J fill:#1e272e,stroke:#ff69b4,color:#fff
 //! ```
 //!
-//! ## 🚀 Quick Start
+//! ## Quick Start
 //!
 //! ### Installation
 //!
@@ -114,8 +120,8 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     // Initialize the LSP server
-//!     universal_lsp::start_server().await.expect("Failed to start LSP server");
+//! // Initialize the LSP server
+//! universal_lsp::start_server().await.expect("Failed to start LSP server");
 //! }
 //! ```
 //!
@@ -133,21 +139,21 @@
 //! // Parse code with tree-sitter
 //! let parser = TreeSitterParser::new();
 //! let symbols = parser.parse_symbols("javascript", r#"
-//!     function hello(name) {
-//!         console.log(`Hello, ${name}!`);
-//!     }
+//! function hello(name) {
+//! console.log(`Hello, ${name}!`);
+//! }
 //! "#).unwrap();
 //!
 //! // Get AI-powered completions
 //! let config = ClaudeConfig {
-//!     api_key: std::env::var("ANTHROPIC_API_KEY").unwrap(),
-//!     model: "claude-sonnet-4".to_string(),
-//!     max_tokens: 1024,
+//! api_key: std::env::var("ANTHROPIC_API_KEY").unwrap(),
+//! model: "claude-sonnet-4".to_string(),
+//! max_tokens: 1024,
 //! };
 //! let client = ClaudeClient::new(config);
 //! ```
 //!
-//! ## 📦 Modules
+//! ## Modules
 //!
 //! ### Core Modules
 //!
@@ -175,7 +181,7 @@
 //!
 //! - [`language`] - Language detection and metadata
 //!
-//! ## 📖 Examples
+//! ## Examples
 //!
 //! ### Example 1: Basic LSP Server
 //!
@@ -213,27 +219,27 @@
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = ClaudeConfig {
-//!     api_key: std::env::var("ANTHROPIC_API_KEY")?,
-//!     model: "claude-sonnet-4".to_string(),
-//!     max_tokens: 1024,
+//! api_key: std::env::var("ANTHROPIC_API_KEY")?,
+//! model: "claude-sonnet-4".to_string(),
+//! max_tokens: 1024,
 //! };
 //!
 //! let client = ClaudeClient::new(config);
 //! let context = CompletionContext {
-//!     prefix: "function calculateSum(".to_string(),
-//!     suffix: ") {\n}".to_string(),
-//!     language: "javascript".to_string(),
+//! prefix: "function calculateSum(".to_string(),
+//! suffix: ") {\n}".to_string(),
+//! language: "javascript".to_string(),
 //! };
 //!
 //! let suggestions = client.get_completions(context).await?;
 //! for suggestion in suggestions {
-//!     println!("Suggestion: {}", suggestion);
+//! println!("Suggestion: {}", suggestion);
 //! }
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! ## ⚙️ Configuration
+//! ## Configuration
 //!
 //! ### Basic Configuration File
 //!
@@ -271,17 +277,17 @@
 //! args = ["-y", "@github/github-mcp-server"]
 //! ```
 //!
-//! ## 📊 Performance
+//! ## Performance
 //!
 //! ### Benchmarks
 //!
-//! | Operation               | Latency (p50) | Latency (p95) | Throughput   |
+//! | Operation | Latency (p50) | Latency (p95) | Throughput |
 //! |------------------------|---------------|---------------|--------------|
-//! | Symbol parsing         | 2.1 ms        | 5.3 ms        | 476 req/sec  |
-//! | Local completions      | 8.4 ms        | 18.2 ms       | 119 req/sec  |
-//! | AI completions (Claude)| 342 ms        | 890 ms        | 2.9 req/sec  |
-//! | Diagnostics            | 12.3 ms       | 28.7 ms       | 81 req/sec   |
-//! | Code actions           | 6.8 ms        | 15.1 ms       | 147 req/sec  |
+//! | Symbol parsing | 2.1 ms | 5.3 ms | 476 req/sec |
+//! | Local completions | 8.4 ms | 18.2 ms | 119 req/sec |
+//! | AI completions (Claude)| 342 ms | 890 ms | 2.9 req/sec |
+//! | Diagnostics | 12.3 ms | 28.7 ms | 81 req/sec |
+//! | Code actions | 6.8 ms | 15.1 ms | 147 req/sec |
 //!
 //! ### Memory Usage
 //!
@@ -290,22 +296,22 @@
 //! - **Grammar cache**: ~120 MB (shared across all documents)
 //! - **MCP coordinator**: ~30 MB
 //!
-//! ## 🔗 Links
+//! ## Links
 //!
 //! - **Documentation**: <https://valknarthing.github.io/universal-lsp/>
 //! - **Repository**: <https://github.com/valknarthing/universal-lsp>
 //! - **Issue Tracker**: <https://github.com/valknarthing/universal-lsp/issues>
 //! - **Crates.io**: <https://crates.io/crates/universal-lsp>
 //!
-//! ## 📄 License
+//! ## License
 //!
 //! This project is licensed under the MIT License - see the [LICENSE](https://github.com/valknarthing/universal-lsp/blob/main/LICENSE) file for details.
 //!
-//! ## 👥 Authors
+//! ## Authors
 //!
 //! - **Sebastian Krüger** ([@valknarthing](https://github.com/valknarthing))
 //!
-//! ## 🙏 Acknowledgments
+//! ## Acknowledgments
 //!
 //! - Tree-sitter community for excellent parsing libraries
 //! - Anthropic for Claude AI capabilities
@@ -350,7 +356,7 @@ pub use proxy::{ProxyConfig, ProxyManager, LspProxy};
 /// # }
 /// ```
 pub async fn start_basic_server() -> anyhow::Result<()> {
-    // This would connect to the actual server implementation
-    // For now, this is a placeholder for documentation
-    unimplemented!("Use the binary entry point: `universal-lsp lsp`")
+ // This would connect to the actual server implementation
+ // For now, this is a placeholder for documentation
+ unimplemented!("Use the binary entry point: `universal-lsp lsp`")
 }

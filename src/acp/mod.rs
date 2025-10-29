@@ -73,7 +73,7 @@ impl UniversalAgent {
             format!(
                 "I'm the Universal LSP ACP Agent with MCP integration.\n\n\
                  Your message: {}\n\n\
-                 I support 242+ programming languages and can help with:\n\
+                 I support 19+ programming languages and can help with:\n\
                  • Code completions and suggestions\n\
                  • Code explanations and documentation\n\
                  • Refactoring suggestions\n\
@@ -86,7 +86,7 @@ impl UniversalAgent {
             format!(
                 "I'm the Universal LSP ACP Agent.\n\n\
                  Your message: {}\n\n\
-                 I support 242+ programming languages and can help with:\n\
+                 I support 19+ programming languages and can help with:\n\
                  • Code completions and suggestions\n\
                  • Code explanations and documentation\n\
                  • Refactoring suggestions\n\
@@ -231,7 +231,7 @@ impl acp::Agent for UniversalAgent {
             "universal-lsp/get-languages" => {
                 Ok(serde_json::value::to_raw_value(&json!({
                     "languages": ["JavaScript", "Python", "Rust", "Go", "TypeScript", "..."],
-                    "total": 242
+                    "total": 19
                 }))?
                 .into())
             }
@@ -478,7 +478,7 @@ mod tests {
         // Parse the response to verify it contains language info
         let response_str = response.to_string();
         assert!(response_str.contains("languages"));
-        assert!(response_str.contains("242"));
+        assert!(response_str.contains("19"));
     }
 
     #[tokio::test]
@@ -554,7 +554,7 @@ mod tests {
         let response = agent.generate_response("Test prompt");
 
         assert!(response.contains("Universal LSP ACP Agent"));
-        assert!(response.contains("242+ programming languages"));
+        assert!(response.contains("19+ programming languages"));
         assert!(response.contains("MCP integration is not available"));
         assert!(response.contains("Test prompt"));
     }
