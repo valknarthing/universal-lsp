@@ -50,14 +50,14 @@ async fn test_completion_context_creation() {
         language: "python".to_string(),
         file_path: "/path/to/test.py".to_string(),
         prefix: "def calculate_sum(".to_string(),
-        suffix: ") -> int:\n    return a + b".to_string(),
+        suffix: Some(") -> int:\n    return a + b".to_string()),
         context: Some("Previous function:\ndef helper():\n    pass".to_string()),
     };
 
     assert_eq!(context.language, "python");
     assert_eq!(context.file_path, "/path/to/test.py");
     assert_eq!(context.prefix, "def calculate_sum(");
-    assert_eq!(context.suffix, ") -> int:\n    return a + b");
+    assert_eq!(context.suffix, Some(") -> int:\n    return a + b".to_string()));
     assert!(context.context.is_some());
 }
 
@@ -67,11 +67,11 @@ async fn test_completion_context_without_suffix() {
         language: "javascript".to_string(),
         file_path: "/path/to/test.js".to_string(),
         prefix: "function greet(name) {".to_string(),
-        suffix: String::new(),
+        suffix: None,
         context: None,
     };
 
-    assert!(context.suffix.is_empty());
+    assert!(context.suffix.is_none());
     assert!(context.context.is_none());
 }
 
@@ -143,7 +143,7 @@ async fn test_completion_context_with_large_prefix() {
         language: "python".to_string(),
         file_path: "/test.py".to_string(),
         prefix: large_prefix.clone(),
-        suffix: String::new(),
+        suffix: None,
         context: None,
     };
 
@@ -162,7 +162,7 @@ async fn test_completion_context_multiple_languages() {
             language: lang.to_string(),
             file_path: format!("/test.{}", lang),
             prefix: "test code".to_string(),
-            suffix: String::new(),
+            suffix: None,
             context: None,
         };
 
@@ -199,12 +199,12 @@ async fn test_completion_context_with_utf8() {
         language: "python".to_string(),
         file_path: "/test.py".to_string(),
         prefix: "# Comment with emoji 😀\ndef greet(".to_string(),
-        suffix: "):\n    return \"Hello 世界\"".to_string(),
+        suffix: Some("):\n    return \"Hello 世界\"".to_string()),
         context: None,
     };
 
     assert!(context.prefix.contains("😀"));
-    assert!(context.suffix.contains("世界"));
+    assert!(context.suffix.as_ref().unwrap().contains("世界"));
 }
 
 #[tokio::test]
@@ -238,7 +238,7 @@ async fn test_completion_context_edge_cases() {
         language: "python".to_string(),
         file_path: "/test.py".to_string(),
         prefix: String::new(),
-        suffix: "def foo():\n    pass".to_string(),
+        suffix: Some("def foo():\n    pass".to_string()),
         context: None,
     };
     assert!(empty_prefix.prefix.is_empty());
@@ -248,7 +248,7 @@ async fn test_completion_context_edge_cases() {
         language: "python".to_string(),
         file_path: "/test.py".to_string(),
         prefix: "   \n\n\t".to_string(),
-        suffix: String::new(),
+        suffix: None,
         context: None,
     };
     assert!(!whitespace_prefix.prefix.is_empty());
@@ -288,7 +288,7 @@ async fn test_completion_context_file_paths() {
             language: "python".to_string(),
             file_path: path.to_string(),
             prefix: "test".to_string(),
-            suffix: String::new(),
+            suffix: None,
             context: None,
         };
 
@@ -342,7 +342,7 @@ async fn test_completion_context_multiline_prefix() {
         language: "python".to_string(),
         file_path: "/test.py".to_string(),
         prefix: multiline.to_string(),
-        suffix: String::new(),
+        suffix: None,
         context: None,
     };
 
@@ -391,7 +391,7 @@ async fn test_completion_context_special_characters() {
         language: "python".to_string(),
         file_path: "/test.py".to_string(),
         prefix: special_chars.to_string(),
-        suffix: String::new(),
+        suffix: None,
         context: None,
     };
 

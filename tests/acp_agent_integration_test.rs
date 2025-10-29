@@ -12,10 +12,12 @@
 
 use universal_lsp::acp::UniversalAgent;
 use serde_json::json;
+use tokio::sync::mpsc;
 
 #[tokio::test]
 async fn test_agent_creation_basic() {
-    let agent = UniversalAgent::new();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let agent = UniversalAgent::new(tx);
 
     // Agent should be created successfully
     assert!(true, "UniversalAgent created successfully");
@@ -23,7 +25,8 @@ async fn test_agent_creation_basic() {
 
 #[tokio::test]
 async fn test_agent_initialization() {
-    let agent = UniversalAgent::new();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let agent = UniversalAgent::new(tx);
 
     // Agent should be initialized and ready
     assert!(true, "Agent initialized");
@@ -32,8 +35,10 @@ async fn test_agent_initialization() {
 #[tokio::test]
 async fn test_agent_session_id_generation() {
     // Create multiple agents and verify they have unique sessions
-    let agent1 = UniversalAgent::new();
-    let agent2 = UniversalAgent::new();
+    let (tx1, _rx1) = mpsc::unbounded_channel();
+    let agent1 = UniversalAgent::new(tx1);
+    let (tx2, _rx2) = mpsc::unbounded_channel();
+    let agent2 = UniversalAgent::new(tx2);
 
     // Each agent should be independent
     assert!(true, "Multiple agents can be created");
@@ -381,7 +386,8 @@ async fn test_agent_concurrent_sessions() {
     // Test multiple concurrent agent sessions
     let tasks: Vec<_> = (0..5).map(|i| {
         task::spawn(async move {
-            let _agent = UniversalAgent::new();
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let _agent = UniversalAgent::new(tx);
 
             // Simulate some work
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

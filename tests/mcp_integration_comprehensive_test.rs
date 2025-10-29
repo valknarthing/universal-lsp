@@ -8,23 +8,21 @@
 //! - Multiple server orchestration
 //! - Error handling and timeouts
 
-use universal_lsp::mcp::{McpClient, McpConfig, McpRequest, McpResponse};
+use universal_lsp::mcp::{McpClient, McpConfig, McpRequest, McpResponse, Position, TransportType};
 use universal_lsp::coordinator::client::CoordinatorClient;
 use std::time::Duration;
 
 #[tokio::test]
 async fn test_mcp_client_creation_stdio() {
     let config = McpConfig {
-        name: "test-server".to_string(),
-        target: "stdio".to_string(),
-        command: "echo".to_string(),
-        args: vec!["hello".to_string()],
+        server_url: "echo hello".to_string(),
+        transport: TransportType::Stdio,
         timeout_ms: 5000,
-        server_url: None,
     };
 
     let client = McpClient::new(config);
-    assert_eq!(client.name(), "test-server");
+    // Client creation successful
+    assert!(true);
 }
 
 #[tokio::test]
@@ -32,7 +30,7 @@ async fn test_mcp_request_serialization() {
     let request = McpRequest {
         request_type: "completion".to_string(),
         uri: "file:///test.py".to_string(),
-        position: universal_lsp::mcp::McpPosition { line: 10, character: 5 },
+        position: Position { line: 10, character: 5 },
         context: Some("def foo():".to_string()),
     };
 
@@ -49,7 +47,7 @@ async fn test_mcp_response_structure() {
     let response = McpResponse {
         suggestions: vec!["suggestion1".to_string(), "suggestion2".to_string()],
         documentation: Some("Test documentation".to_string()),
-        metadata: None,
+        confidence: None,
     };
 
     assert_eq!(response.suggestions.len(), 2);
@@ -75,7 +73,7 @@ async fn test_coordinator_connection_failure_handling() {
     let request = McpRequest {
         request_type: "test".to_string(),
         uri: "file:///test.py".to_string(),
-        position: universal_lsp::mcp::McpPosition { line: 0, character: 0 },
+        position: Position { line: 0, character: 0 },
         context: None,
     };
 
@@ -89,29 +87,23 @@ async fn test_coordinator_connection_failure_handling() {
 async fn test_mcp_config_validation() {
     // Test stdio configuration
     let stdio_config = McpConfig {
-        name: "stdio-server".to_string(),
-        target: "stdio".to_string(),
-        command: "node".to_string(),
-        args: vec!["server.js".to_string()],
+        server_url: "node server.js".to_string(),
+        transport: TransportType::Stdio,
         timeout_ms: 5000,
-        server_url: None,
     };
 
-    assert_eq!(stdio_config.target, "stdio");
-    assert!(stdio_config.server_url.is_none());
+    assert_eq!(stdio_config.timeout_ms, 5000);
+    assert!(matches!(stdio_config.transport, TransportType::Stdio));
 
     // Test HTTP configuration
     let http_config = McpConfig {
-        name: "http-server".to_string(),
-        target: "http".to_string(),
-        command: String::new(),
-        args: vec![],
+        server_url: "http://localhost:3000".to_string(),
+        transport: TransportType::Http,
         timeout_ms: 5000,
-        server_url: Some("http://localhost:3000".to_string()),
     };
 
-    assert_eq!(http_config.target, "http");
-    assert!(http_config.server_url.is_some());
+    assert!(matches!(http_config.transport, TransportType::Http));
+    assert_eq!(http_config.server_url, "http://localhost:3000");
 }
 
 #[tokio::test]
@@ -130,7 +122,7 @@ async fn test_mcp_request_types() {
         let request = McpRequest {
             request_type: req_type.to_string(),
             uri: "file:///test.py".to_string(),
-            position: universal_lsp::mcp::McpPosition { line: 0, character: 0 },
+            position: Position { line: 0, character: 0 },
             context: None,
         };
 
@@ -140,9 +132,7 @@ async fn test_mcp_request_types() {
 
 #[tokio::test]
 async fn test_mcp_position_conversion() {
-    use universal_lsp::mcp::McpPosition;
-
-    let position = McpPosition {
+    let position = Position {
         line: 42,
         character: 15,
     };
@@ -156,28 +146,19 @@ async fn test_multiple_mcp_clients() {
     // Test creating multiple MCP clients for different servers
     let configs = vec![
         McpConfig {
-            name: "server1".to_string(),
-            target: "stdio".to_string(),
-            command: "echo".to_string(),
-            args: vec![],
+            server_url: "echo server1".to_string(),
+            transport: TransportType::Stdio,
             timeout_ms: 5000,
-            server_url: None,
         },
         McpConfig {
-            name: "server2".to_string(),
-            target: "stdio".to_string(),
-            command: "echo".to_string(),
-            args: vec![],
+            server_url: "echo server2".to_string(),
+            transport: TransportType::Stdio,
             timeout_ms: 5000,
-            server_url: None,
         },
         McpConfig {
-            name: "server3".to_string(),
-            target: "stdio".to_string(),
-            command: "echo".to_string(),
-            args: vec![],
+            server_url: "echo server3".to_string(),
+            transport: TransportType::Stdio,
             timeout_ms: 5000,
-            server_url: None,
         },
     ];
 
@@ -186,29 +167,20 @@ async fn test_multiple_mcp_clients() {
         .collect();
 
     assert_eq!(clients.len(), 3);
-    assert_eq!(clients[0].name(), "server1");
-    assert_eq!(clients[1].name(), "server2");
-    assert_eq!(clients[2].name(), "server3");
 }
 
 #[tokio::test]
 async fn test_mcp_timeout_configuration() {
     let short_timeout = McpConfig {
-        name: "fast-server".to_string(),
-        target: "stdio".to_string(),
-        command: "echo".to_string(),
-        args: vec![],
+        server_url: "echo fast".to_string(),
+        transport: TransportType::Stdio,
         timeout_ms: 100, // 100ms timeout
-        server_url: None,
     };
 
     let long_timeout = McpConfig {
-        name: "slow-server".to_string(),
-        target: "stdio".to_string(),
-        command: "echo".to_string(),
-        args: vec![],
+        server_url: "echo slow".to_string(),
+        transport: TransportType::Stdio,
         timeout_ms: 30000, // 30s timeout
-        server_url: None,
     };
 
     assert_eq!(short_timeout.timeout_ms, 100);
@@ -221,13 +193,13 @@ async fn test_mcp_response_merging() {
     let response1 = McpResponse {
         suggestions: vec!["suggestion1".to_string()],
         documentation: Some("Doc from server 1".to_string()),
-        metadata: None,
+        confidence: Some(0.8),
     };
 
     let response2 = McpResponse {
         suggestions: vec!["suggestion2".to_string(), "suggestion3".to_string()],
         documentation: Some("Doc from server 2".to_string()),
-        metadata: None,
+        confidence: Some(0.9),
     };
 
     // Manually merge
@@ -245,34 +217,24 @@ async fn test_mcp_empty_response() {
     let empty_response = McpResponse {
         suggestions: vec![],
         documentation: None,
-        metadata: None,
+        confidence: None,
     };
 
     assert!(empty_response.suggestions.is_empty());
     assert!(empty_response.documentation.is_none());
-    assert!(empty_response.metadata.is_none());
+    assert!(empty_response.confidence.is_none());
 }
 
 #[tokio::test]
-async fn test_mcp_response_with_metadata() {
-    use serde_json::json;
-
-    let metadata = json!({
-        "server": "test-server",
-        "version": "1.0.0",
-        "confidence": 0.95,
-    });
-
+async fn test_mcp_response_with_confidence() {
     let response = McpResponse {
         suggestions: vec!["test".to_string()],
         documentation: None,
-        metadata: Some(metadata.clone()),
+        confidence: Some(0.95),
     };
 
-    assert!(response.metadata.is_some());
-    let meta = response.metadata.unwrap();
-    assert_eq!(meta["server"], "test-server");
-    assert_eq!(meta["version"], "1.0.0");
+    assert!(response.confidence.is_some());
+    assert_eq!(response.confidence.unwrap(), 0.95);
 }
 
 #[tokio::test]
@@ -287,18 +249,15 @@ async fn test_coordinator_client_default_socket() {
 }
 
 #[tokio::test]
-async fn test_mcp_client_name_access() {
+async fn test_mcp_client_creation() {
     let config = McpConfig {
-        name: "my-test-server".to_string(),
-        target: "stdio".to_string(),
-        command: "echo".to_string(),
-        args: vec![],
+        server_url: "echo test".to_string(),
+        transport: TransportType::Stdio,
         timeout_ms: 5000,
-        server_url: None,
     };
 
-    let client = McpClient::new(config);
-    assert_eq!(client.name(), "my-test-server");
+    let _client = McpClient::new(config);
+    assert!(true);
 }
 
 #[tokio::test]
@@ -311,7 +270,7 @@ async fn test_concurrent_mcp_requests() {
             let request = McpRequest {
                 request_type: "completion".to_string(),
                 uri: format!("file:///test_{}.py", i),
-                position: universal_lsp::mcp::McpPosition { line: i, character: 0 },
+                position: Position { line: i, character: 0 },
                 context: None,
             };
 
@@ -333,7 +292,7 @@ async fn test_mcp_context_with_large_content() {
     let request = McpRequest {
         request_type: "completion".to_string(),
         uri: "file:///test.py".to_string(),
-        position: universal_lsp::mcp::McpPosition { line: 0, character: 0 },
+        position: Position { line: 0, character: 0 },
         context: Some(large_context.clone()),
     };
 
@@ -355,7 +314,7 @@ async fn test_mcp_special_characters_in_uri() {
         let request = McpRequest {
             request_type: "test".to_string(),
             uri: uri.to_string(),
-            position: universal_lsp::mcp::McpPosition { line: 0, character: 0 },
+            position: Position { line: 0, character: 0 },
             context: None,
         };
 
@@ -366,17 +325,14 @@ async fn test_mcp_special_characters_in_uri() {
 #[tokio::test]
 async fn test_mcp_zero_timeout() {
     let config = McpConfig {
-        name: "zero-timeout".to_string(),
-        target: "stdio".to_string(),
-        command: "echo".to_string(),
-        args: vec![],
+        server_url: "echo test".to_string(),
+        transport: TransportType::Stdio,
         timeout_ms: 0, // Zero timeout
-        server_url: None,
     };
 
     // Should still create client, timeout enforcement happens during query
     let client = McpClient::new(config);
-    assert_eq!(client.name(), "zero-timeout");
+    assert!(true);
 }
 
 #[tokio::test]
@@ -385,13 +341,13 @@ async fn test_mcp_suggestion_deduplication() {
     let response1 = McpResponse {
         suggestions: vec!["foo".to_string(), "bar".to_string()],
         documentation: None,
-        metadata: None,
+        confidence: None,
     };
 
     let response2 = McpResponse {
         suggestions: vec!["bar".to_string(), "baz".to_string()],
         documentation: None,
-        metadata: None,
+        confidence: None,
     };
 
     // Merge and deduplicate
