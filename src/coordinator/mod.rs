@@ -49,6 +49,11 @@ pub struct Coordinator {
 impl Coordinator {
     /// Create a new coordinator from configuration
     pub fn new(config: &Config) -> Self {
+        Self::with_socket_path(config, "/tmp/universal-mcp.sock")
+    }
+
+    /// Create a new coordinator with a custom socket path
+    pub fn with_socket_path(config: &Config, socket_path: impl Into<PathBuf>) -> Self {
         let cache_ttl = 300; // 5 minutes default
         let timeout_ms = config.mcp.timeout_ms;
 
@@ -59,7 +64,7 @@ impl Coordinator {
             total_queries: std::sync::atomic::AtomicU64::new(0),
             errors: std::sync::atomic::AtomicU64::new(0),
             server_configs: config.mcp.servers.clone(),
-            socket_path: PathBuf::from("/tmp/universal-mcp.sock"),
+            socket_path: socket_path.into(),
         }
     }
 
