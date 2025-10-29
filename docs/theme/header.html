@@ -1,0 +1,90 @@
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#ff69b4',
+      primaryTextColor: '#1e272e',
+      primaryBorderColor: '#ff1493',
+      lineColor: '#ff69b4',
+      secondaryColor: '#2f3542',
+      tertiaryColor: '#1e272e',
+      background: '#1e272e',
+      mainBkg: '#2f3542',
+      secondBkg: '#1e272e',
+      border1: '#ff69b4',
+      border2: '#ff1493',
+      note: '#2f3542',
+      noteBkgColor: '#2f3542',
+      noteTextColor: '#ffffff',
+      noteBorderColor: '#ff69b4',
+      arrowheadColor: '#ff69b4',
+      fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+      fontSize: '16px',
+      darkMode: true,
+      edgeLabelBackground: '#1e272e',
+      clusterBkg: '#2f3542',
+      clusterBorder: '#ff69b4',
+      defaultLinkColor: '#ff69b4',
+      titleColor: '#ffffff',
+      nodeTextColor: '#e8eaed'
+    },
+    flowchart: {
+      htmlLabels: true,
+      curve: 'basis',
+      useMaxWidth: true,
+      padding: 20
+    },
+    securityLevel: 'loose'
+  });
+
+  // Use both DOMContentLoaded and load events for better compatibility
+  function initMermaid() {
+    const mermaidBlocks = document.querySelectorAll(
+      'pre.language-mermaid code'
+    );
+
+    if (mermaidBlocks.length === 0) {
+      console.log('No mermaid blocks found');
+      return;
+    }
+
+    console.log(`Found ${mermaidBlocks.length} mermaid blocks, converting...`);
+
+    mermaidBlocks.forEach((block, index) => {
+      const mermaidDiv = document.createElement('div');
+      mermaidDiv.className = 'mermaid';
+      mermaidDiv.id = `mermaid-diagram-${index}`;
+      mermaidDiv.textContent = block.textContent;
+      block.parentElement.replaceWith(mermaidDiv);
+    });
+
+    setTimeout(() => {
+      mermaid
+        .run()
+        .then(() => {
+          console.log('Mermaid diagrams rendered successfully');
+        })
+        .catch((err) => {
+          console.error('Mermaid rendering error:', err);
+        });
+    }, 100);
+  }
+
+  // Try multiple event listeners to ensure it runs
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMermaid);
+  } else {
+    // DOM already loaded
+    initMermaid();
+  }
+
+  window.addEventListener('load', () => {
+    // Failsafe: run again on window load if diagrams still missing
+    if (document.querySelectorAll('.mermaid svg').length === 0) {
+      initMermaid();
+    }
+  });
+</script>

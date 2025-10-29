@@ -32,13 +32,9 @@ jobs:
 
       - name: Build documentation
         run: |
-          cargo doc --no-deps --document-private-items
+          export RUSTDOCFLAGS="--extend-css $PWD/docs/theme/universal-lsp-complete.css --html-in-header $PWD/docs/theme/header.html"
+          cargo doc --no-deps --lib
           echo '<meta http-equiv="refresh" content="0; url=universal_lsp/index.html">' > target/doc/index.html
-
-      - name: Apply custom theme
-        run: |
-          cp docs/theme/universal-lsp.css target/doc/
-          find target/doc -name "*.html" -type f -exec sed -i 's|<head>|<head><link rel="stylesheet" type="text/css" href="/universal-lsp.css">|' {} \;
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

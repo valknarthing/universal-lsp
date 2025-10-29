@@ -1,0 +1,199 @@
+/* Universal LSP Complete Theme - Slate/Navy/Pink */
+/* Overrides ALL rustdoc variables for both light and dark modes */
+
+/* Import Google Font - Inter for better readability */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* Force dark theme regardless of system preference */
+:root,
+:root:not([data-theme]),
+:root[data-theme='dark'],
+:root[data-theme='light'] {
+  --main-background-color: #2f3542;
+  --main-color: #e8eaed;
+  --settings-input-color: #e8eaed;
+  --settings-input-border-color: #57606f;
+  --settings-button-color: #ff69b4;
+  --settings-button-border-focus: #ff1493;
+  --link-color: #ff69b4;
+  --code-highlight-kw-color: #ff69b4;
+  --code-highlight-kw-2-color: #ff1493;
+  --code-highlight-kw-3-color: #ec407a;
+  --sidebar-background-color: #1e272e;
+  --sidebar-background-color-hover: #24272e;
+  --sidebar-elems-color: #e8eaed;
+  --sidebar-border-color: #57606f;
+  --sidebar-link-color: #e8eaed;
+  --sidebar-current-link-background-color: rgba(255, 105, 180, 0.15);
+  --search-input-focused-border-color: #ff69b4;
+  --search-results-alias-color: #ff69b4;
+  --search-results-grey-color: #747d8c;
+  --search-tab-title-count-color: #ff69b4;
+  --search-background-color: #2f3542;
+  --search-color: #e8eaed;
+  --search-error-code-background-color: #1e272e;
+  --search-results-border-color: #57606f;
+  --search-tab-button-not-selected-border-top-color: #57606f;
+  --search-tab-button-not-selected-background: #24272e;
+  --search-tab-button-selected-border-top-color: #ff69b4;
+  --search-tab-button-selected-background: #2f3542;
+  --search-result-link-focus-background-color: rgba(255, 105, 180, 0.1);
+  --search-result-border-color: #57606f;
+  --search-input-border-color: #57606f;
+  --code-block-background-color: #1e272e;
+  --codeblock-error-hover-color: rgba(255, 105, 180, 0.1);
+  --codeblock-error-color: rgba(255, 20, 147, 0.8);
+  --codeblock-ignore-hover-color: #ffffff;
+  --codeblock-ignore-color: #e8eaed;
+  --codeblock-link-background: #1e272e;
+  --codeblock-link-hover-background: #24272e;
+  --scrollbar-track-background-color: #1e272e;
+  --scrollbar-thumb-background-color: #ff69b4;
+  --scrollbar-color: #ff69b4 #1e272e;
+  --heading-color: #ff69b4;
+  --title-color: #ff69b4;
+  --subtitle-color: #ff1493;
+  --headings-border-bottom-color: #ff69b4;
+  --border-color: #57606f;
+  --table-border-color: #57606f;
+  --table-head-background-color: #1e272e;
+  --button-background-color: #1e272e;
+  --button-border-color: #57606f;
+  --right-side-color: #e8eaed;
+  --tr-even-background-color: #24272e;
+  --tr-odd-background-color: #2f3542;
+  --table-alt-row-background-color: #24272e;
+  --quote-color: #747d8c;
+  --quote-border-color: #ff69b4;
+  --type-link-color: #ff69b4;
+  --trait-link-color: #ff1493;
+  --assoc-item-link-color: #ec407a;
+  --fn-link-color: #ff69b4;
+  --function-link-color: #ff69b4;
+  --macro-link-color: #f06292;
+  --keyword-link-color: #ff69b4;
+  --mod-link-color: #ff1493;
+  --docblock-table-border-color: #57606f;
+  --docblock-code-background-color: #1e272e;
+  --mobile-sidebar-menu-filter: none;
+  --mobile-sidebar-menu-hover-filter: invert(100%) brightness(1.2);
+  --src-line-numbers-span-color: #57606f;
+  --src-line-number-highlighted-background-color: rgba(255, 105, 180, 0.1);
+  --src-sidebar-background-selected: rgba(255, 105, 180, 0.15);
+  --src-sidebar-background-hover: rgba(255, 105, 180, 0.1);
+  --item-table-header-background-color: #1e272e;
+  --item-table-header-border-color: #57606f;
+  --scraped-example-title-color: #ff69b4;
+  --scraped-example-help-border-color: #57606f;
+  --scraped-example-help-color: #e8eaed;
+  --scraped-example-help-hover-border-color: #ff69b4;
+  --scraped-example-help-hover-color: #ffffff;
+  --scraped-example-code-line-highlight: rgba(255, 105, 180, 0.1);
+  --scraped-example-code-line-highlight-focus: rgba(255, 105, 180, 0.2);
+  --scrape-example-code-line-highlight: rgba(255, 105, 180, 0.1);
+  --scrape-example-code-line-highlight-focus: rgba(255, 105, 180, 0.2);
+  --scrape-example-help-border-color: #57606f;
+  --scrape-example-help-color: #e8eaed;
+  --scrape-example-help-hover-border-color: #ff69b4;
+  --scrape-example-help-hover-color: #ffffff;
+  --scrape-example-toggle-line-background: rgba(255, 105, 180, 0.05);
+  --scrape-example-toggle-line-hover-background: rgba(255, 105, 180, 0.1);
+  --scrape-example-code-wrapper-background-start: rgba(30, 39, 46, 0.9);
+  --scrape-example-code-wrapper-background-end: rgba(30, 39, 46, 0.6);
+  --toggle-filter: invert(100%) brightness(0.8);
+  --toggle-plus-minus-background-color: rgba(255, 105, 180, 0.1);
+  --notable-trait-tooltip-background-color: #1e272e;
+  --notable-trait-tooltip-border-color: #ff69b4;
+  --copy-button-color: #e8eaed;
+  --copy-button-background-color: #1e272e;
+  --copy-button-hover-color: #ffffff;
+  --copy-button-hover-background-color: #24272e;
+  --copy-button-border-color: #57606f;
+  --copy-path-button-color: #e8eaed;
+  --copy-path-img-filter: brightness(0.9) invert(63%) sepia(20%) saturate(5161%)
+    hue-rotate(194deg) brightness(93%) contrast(99%);
+  --copy-path-img-hover-filter: brightness(1.1) invert(63%) sepia(20%)
+    saturate(5161%) hue-rotate(194deg) brightness(93%) contrast(99%);
+  --code-attribute-color: #ff69b4;
+  --code-highlight-lifetime-color: #f06292;
+  --code-highlight-prelude-color: #ff69b4;
+  --code-highlight-prelude-val-color: #ff1493;
+  --code-highlight-number-color: #f06292;
+  --code-highlight-string-color: #ec407a;
+  --code-highlight-literal-color: #ff69b4;
+  --code-highlight-attribute-color: #ff69b4;
+  --code-highlight-self-color: #ff1493;
+  --code-highlight-macro-color: #f06292;
+  --code-highlight-question-mark-color: #ff69b4;
+  --code-highlight-comment-color: #747d8c;
+  --code-highlight-doc-comment-color: #747d8c;
+  --stab-background-color: #1e272e;
+  --stab-code-color: #e8eaed;
+  --stab-unstable-background-color: rgba(255, 105, 180, 0.2);
+  --stab-unstable-code-color: #ff69b4;
+  --stab-deprecated-background-color: rgba(255, 69, 0, 0.2);
+  --stab-deprecated-code-color: #ff4500;
+  --stab-portability-background-color: rgba(116, 125, 140, 0.2);
+  --stab-portability-code-color: #747d8c;
+  --kbd-color: #e8eaed;
+  --kbd-background: #1e272e;
+  --kbd-box-shadow-color: #57606f;
+  --rust-logo-filter: brightness(0) saturate(100%) invert(75%) sepia(100%)
+    saturate(1000%) hue-rotate(290deg) brightness(100%) contrast(100%);
+  --crate-search-div-filter: invert(100%);
+  --crate-search-div-hover-filter: invert(100%);
+  --crate-search-hover-border: #ff69b4;
+  --target-background-color: rgba(255, 105, 180, 0.1);
+  --target-border-color: #ff69b4;
+  --code-example-button-color: #e8eaed;
+  --code-example-button-background-color: #1e272e;
+  --code-example-button-hover-background-color: #24272e;
+  --code-example-button-hover-color: #ffffff;
+  --settings-menu-filter: brightness(0.9) invert(65%) sepia(67%) saturate(3704%)
+    hue-rotate(300deg) brightness(108%) contrast(101%);
+  --settings-menu-hover-background-color: rgba(255, 105, 180, 0.1);
+  --settings-menu-hover-filter: brightness(1.1) invert(65%) sepia(67%)
+    saturate(3704%) hue-rotate(300deg) brightness(108%) contrast(101%);
+  --help-border-color: #57606f;
+  --help-background-color: #2f3542;
+  --help-color: #e8eaed;
+  --warning-border-color: #f59e0b;
+  --warning-background-color: rgba(245, 158, 11, 0.1);
+  --note-background-color: rgba(59, 130, 246, 0.1);
+  --note-border-color: #3b82f6;
+  --toggles-color: #e8eaed;
+  --sidebar-resizer-hover: #ff69b4;
+  --sidebar-resizer-active: #ff1493;
+  --font-family: 'Inter', 'Fira Sans', Arial, sans-serif;
+  --font-family-code: 'JetBrains Mono', 'Fira Mono', monospace;
+  --link-color-alternative: #6495ed;
+}
+
+.mermaid {
+  width: 100%;
+  height: auto;
+  padding: 14px;
+  background-color: var(--code-block-background-color);
+  border-radius: var(--code-block-border-radius);
+}
+
+.version {
+  color: var(--quote-color);
+}
+
+.sidebar-crate h2 a {
+  color: var(--link-color);
+}
+
+a.doc-anchor {
+  color: var(--link-color-alternative);
+}
+
+pre {
+  font-size: 0.8em;
+}
+
+.docblock :not(pre) > code {
+  font-size: 0.8em;
+  padding: 1px 6px;
+}
