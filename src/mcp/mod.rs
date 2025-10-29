@@ -181,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_context_placeholder() {
-        let mut client = McpClient::new_http("http://localhost:3000", 5000);
+        let client = McpClient::new_http("http://localhost:3000", 5000);
         // This should fail since there's no actual MCP server running
         let result = client.get_context("test query").await;
         assert!(result.is_err(), "Expected error when no MCP server is available");

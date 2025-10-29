@@ -2,11 +2,13 @@
 //!
 //! This library provides a universal Language Server Protocol implementation
 //! supporting 19+ languages with AI-powered features, MCP integration,
-//! and LSP proxy capabilities.
+//! ACP agent capabilities, and LSP proxy capabilities.
 
+pub mod acp;
 pub mod ai;
 pub mod code_actions;
 pub mod config;
+pub mod coordinator;
 pub mod diagnostics;
 pub mod formatting;
 pub mod language;

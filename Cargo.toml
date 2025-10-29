@@ -19,9 +19,11 @@ path = "src/main.rs"
 [dependencies]
 tower-lsp = "0.20"
 tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
+log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dashmap = "5.5"
@@ -70,6 +72,7 @@ tree-sitter-c-sharp = { git = "https://github.com/tree-sitter/tree-sitter-c-shar
 toml = "0.8"
 async-trait = "0.1.89"
 thiserror = "2.0.17"
+agent-client-protocol = "0.7.0"
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -78,6 +81,11 @@ tempfile = "3.8"
 warp = "0.3"  # For mock HTTP servers in tests
 hyper = "0.14"  # For HTTP testing
 criterion = { version = "0.5", features = ["html_reports"] }
+futures = "0.3"  # For join_all in async tests
+
+[[bin]]
+name = "mock-mcp-server"
+path = "tests/mock_mcp_server.rs"
 
 [[bench]]
 name = "performance"
