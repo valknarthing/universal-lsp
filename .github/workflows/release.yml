@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Run tests
+        run: cargo test --all-features --verbose
+
+      - name: Run doc tests
+        run: cargo test --doc --all-features --verbose
+
+  build-and-release:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    needs: [lint, test]
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: universal-lsp
+            asset_name: universal-lsp-linux-x86_64.tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: universal-lsp
+            asset_name: universal-lsp-linux-aarch64.tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: universal-lsp
+            asset_name: universal-lsp-macos-x86_64.tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: universal-lsp
+            asset_name: universal-lsp-macos-aarch64.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: universal-lsp.exe
+            asset_name: universal-lsp-windows-x86_64.zip
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --verbose
+
+      - name: Strip binary (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+      - name: Create release directory
+        run: mkdir -p release
+
+      - name: Copy binary
+        if: matrix.os != 'windows-latest'
+        run: cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release/
+
+      - name: Copy binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: copy target\${{ matrix.target }}\release\${{ matrix.artifact_name }} release\
+
+      - name: Copy LICENSE and README
+        if: matrix.os != 'windows-latest'
+        run: |
+          cp LICENSE release/
+          cp README.md release/
+
+      - name: Copy LICENSE and README (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          copy LICENSE release\
+          copy README.md release\
+
+      - name: Create tarball (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: tar -czf ${{ matrix.asset_name }} -C release .
+
+      - name: Create zip (Windows)
+        if: matrix.os == 'windows-latest'
+        run: Compress-Archive -Path release\* -DestinationPath ${{ matrix.asset_name }}
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+          generate_release_notes: true
+          body: |
+            ## Universal LSP ${{ github.ref_name }}
+
+            AI-powered Language Server Protocol implementation supporting 242+ programming languages.
+
+            ### Features
+            - 242+ language support via Tree-sitter
+            - AI-powered completions (Claude + Copilot)
+            - Model Context Protocol (MCP) integration
+            - Agent Client Protocol (ACP) support
+
+            ### Installation
+
+            Download the appropriate binary for your platform:
+            - **Linux x86_64**: `universal-lsp-linux-x86_64.tar.gz`
+            - **Linux ARM64**: `universal-lsp-linux-aarch64.tar.gz`
+            - **macOS Intel**: `universal-lsp-macos-x86_64.tar.gz`
+            - **macOS Apple Silicon**: `universal-lsp-macos-aarch64.tar.gz`
+            - **Windows x86_64**: `universal-lsp-windows-x86_64.zip`
+
+            Extract and add to your PATH:
+            ```bash
+            # Linux/macOS
+            tar -xzf universal-lsp-*.tar.gz
+            sudo mv universal-lsp /usr/local/bin/
+
+            # Windows (PowerShell)
+            Expand-Archive universal-lsp-windows-x86_64.zip
+            # Add to PATH manually
+            ```
+
+            ### Documentation
+            - **Docs**: https://valknarthing.github.io/universal-lsp/
+            - **Repository**: https://github.com/valknarthing/universal-lsp
+
+            ### License
+            MIT License - see LICENSE file included in the release package.
+
+            ---
+            🤖 Generated with [Claude Code](https://claude.com/claude-code)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
