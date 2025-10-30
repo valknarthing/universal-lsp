@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::time::Duration;
 
 /// Claude API configuration
@@ -43,6 +44,10 @@ struct ClaudeRequest {
     max_tokens: usize,
     temperature: f32,
     messages: Vec<Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -59,11 +64,17 @@ struct ClaudeResponse {
     stop_reason: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ContentBlock {
-    #[serde(rename = "type")]
-    content_type: String,
-    text: String,
+#[derive(Debug, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum ContentBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
 }
 
 /// Completion request context
@@ -90,6 +101,24 @@ pub struct CompletionSuggestion {
     pub confidence: f32,
     /// Explanation or documentation
     pub detail: Option<String>,
+}
+
+/// Enhanced response from Claude with tool support
+#[derive(Debug, Clone)]
+pub struct ClaudeToolResponse {
+    /// Text content blocks
+    pub text_blocks: Vec<String>,
+    /// Tool use requests
+    pub tool_uses: Vec<ToolUse>,
+    /// Stop reason
+    pub stop_reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolUse {
+    pub id: String,
+    pub name: String,
+    pub input: Value,
 }
 
 impl ClaudeClient {
@@ -130,11 +159,24 @@ impl ClaudeClient {
 
     /// Send a multi-turn conversation to Claude and get response
     pub async fn send_message(&self, messages: &[Message]) -> Result<String> {
+        let response = self.send_message_with_tools(messages, None, None).await?;
+        Ok(response.text_blocks.join("\n"))
+    }
+
+    /// Send a multi-turn conversation to Claude with tool support
+    pub async fn send_message_with_tools(
+        &self,
+        messages: &[Message],
+        tools: Option<Vec<Value>>,
+        system: Option<String>,
+    ) -> Result<ClaudeToolResponse> {
         let request = ClaudeRequest {
             model: self.config.model.clone(),
             max_tokens: self.config.max_tokens,
             temperature: self.config.temperature,
             messages: messages.to_vec(),
+            tools,
+            system,
         };
 
         let response = self
@@ -160,16 +202,26 @@ impl ClaudeClient {
             .await
             .context("Failed to parse Claude API response")?;
 
-        // Extract text from content blocks
-        let text = claude_response
-            .content
-            .iter()
-            .filter(|block| block.content_type == "text")
-            .map(|block| block.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
+        // Extract text and tool use blocks
+        let mut text_blocks = Vec::new();
+        let mut tool_uses = Vec::new();
 
-        Ok(text)
+        for block in claude_response.content {
+            match block {
+                ContentBlock::Text { text } => {
+                    text_blocks.push(text);
+                }
+                ContentBlock::ToolUse { id, name, input } => {
+                    tool_uses.push(ToolUse { id, name, input });
+                }
+            }
+        }
+
+        Ok(ClaudeToolResponse {
+            text_blocks,
+            tool_uses,
+            stop_reason: claude_response.stop_reason,
+        })
     }
 
     /// Get code completions from Claude
@@ -214,49 +266,12 @@ impl ClaudeClient {
 
     /// Query Claude's Messages API
     async fn query_claude(&self, prompt: &str) -> Result<String> {
-        let request = ClaudeRequest {
-            model: self.config.model.clone(),
-            max_tokens: self.config.max_tokens,
-            temperature: self.config.temperature,
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: prompt.to_string(),
-            }],
-        };
+        let messages = vec![Message {
+            role: "user".to_string(),
+            content: prompt.to_string(),
+        }];
 
-        let response = self
-            .http_client
-            .post("https://api.anthropic.com/v1/messages")
-            .json(&request)
-            .send()
-            .await
-            .context("Failed to send request to Claude API")?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(anyhow::anyhow!(
-                "Claude API returned error status {}: {}",
-                status,
-                error_body
-            ));
-        }
-
-        let claude_response: ClaudeResponse = response
-            .json()
-            .await
-            .context("Failed to parse Claude API response")?;
-
-        // Extract text from content blocks
-        let text = claude_response
-            .content
-            .into_iter()
-            .filter(|block| block.content_type == "text")
-            .map(|block| block.text)
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        Ok(text)
+        self.send_message(&messages).await
     }
 
     /// Parse Claude's response into completion suggestions

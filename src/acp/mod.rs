@@ -23,6 +23,9 @@ use crate::ai::claude::{ClaudeClient, ClaudeConfig};
 use crate::coordinator::CoordinatorClient;
 use dashmap::DashMap;
 
+pub mod tools;
+use tools::ToolRegistry;
+
 /// Universal LSP ACP Agent
 ///
 /// Implements the Agent Client Protocol for providing AI-powered code assistance
@@ -40,6 +43,8 @@ pub struct UniversalAgent {
     sessions: Arc<DashMap<String, Vec<ConversationMessage>>>,
     /// Workspace root directory
     workspace_root: PathBuf,
+    /// Tool registry for Claude-executable actions
+    tools: Arc<ToolRegistry>,
 }
 
 /// Conversation message for history tracking
@@ -105,9 +110,13 @@ impl UniversalAgent {
         // Initialize Claude client if API key is available
         let claude_client = Self::init_claude_client();
 
+        // Initialize tool registry with workspace
+        let tools = Arc::new(ToolRegistry::new(workspace_root.clone()));
+
         info!(
-            "UniversalAgent created (Claude: {}, workspace: {})",
+            "UniversalAgent created (Claude: {}, tools: {}, workspace: {})",
             if claude_client.is_some() { "enabled" } else { "disabled" },
+            tools.count(),
             workspace_root.display()
         );
 
@@ -118,6 +127,7 @@ impl UniversalAgent {
             claude_client,
             sessions: Arc::new(DashMap::new()),
             workspace_root,
+            tools,
         }
     }
 
@@ -147,10 +157,14 @@ impl UniversalAgent {
 
         let claude_client = Self::init_claude_client();
 
+        // Initialize tool registry with workspace
+        let tools = Arc::new(ToolRegistry::new(workspace_root.clone()));
+
         info!(
-            "UniversalAgent created (Claude: {}, MCP: {}, workspace: {})",
+            "UniversalAgent created (Claude: {}, MCP: {}, tools: {}, workspace: {})",
             if claude_client.is_some() { "enabled" } else { "disabled" },
             if coordinator_client.is_some() { "enabled" } else { "disabled" },
+            tools.count(),
             workspace_root.display()
         );
 
@@ -161,6 +175,7 @@ impl UniversalAgent {
             claude_client,
             sessions: Arc::new(DashMap::new()),
             workspace_root,
+            tools,
         }
     }
 
@@ -265,6 +280,102 @@ impl UniversalAgent {
             if let Some(_coordinator) = &self.coordinator_client { "✅ Active" } else { "⚠️ Not available" },
             self.workspace_root.display()
         )
+    }
+
+    /// Call Claude API with tool support and handle tool execution loop
+    async fn call_claude_with_tools(
+        &self,
+        client: &crate::ai::claude::ClaudeClient,
+        mut messages: Vec<crate::ai::claude::Message>,
+        tool_definitions: Vec<serde_json::Value>,
+        system_prompt: String,
+    ) -> Result<String, anyhow::Error> {
+        use serde_json::json;
+
+        const MAX_ITERATIONS: usize = 10; // Prevent infinite loops
+        let mut iteration = 0;
+        let mut accumulated_text = Vec::new();
+
+        loop {
+            iteration += 1;
+            if iteration > MAX_ITERATIONS {
+                warn!("Tool execution loop exceeded maximum iterations ({})", MAX_ITERATIONS);
+                break;
+            }
+
+            // Call Claude with tools
+            let response = client
+                .send_message_with_tools(
+                    &messages,
+                    Some(tool_definitions.clone()),
+                    Some(system_prompt.clone()),
+                )
+                .await?;
+
+            // Collect text blocks
+            if !response.text_blocks.is_empty() {
+                accumulated_text.extend(response.text_blocks.clone());
+            }
+
+            // Check if Claude wants to use tools
+            if response.tool_uses.is_empty() {
+                // No tools to execute, we're done
+                info!("Claude response complete after {} iterations", iteration);
+                break;
+            }
+
+            info!("Claude requested {} tool(s)", response.tool_uses.len());
+
+            // Execute tools and collect results
+            let mut tool_results = Vec::new();
+            for tool_use in &response.tool_uses {
+                info!("Executing tool: {} (id: {})", tool_use.name, tool_use.id);
+
+                let result = match self.tools.execute_tool(&tool_use.name, tool_use.input.clone()).await {
+                    Ok(result) => {
+                        info!("Tool {} succeeded", tool_use.name);
+                        json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use.id,
+                            "content": result.to_string()
+                        })
+                    }
+                    Err(e) => {
+                        error!("Tool {} failed: {}", tool_use.name, e);
+                        json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use.id,
+                            "is_error": true,
+                            "content": format!("Error executing tool: {}", e)
+                        })
+                    }
+                };
+                tool_results.push(result);
+            }
+
+            // Add assistant's response (with tool uses) to messages
+            // Note: In the actual Anthropic API, we need to format this properly
+            // For now, we'll create a simplified version
+            let assistant_content = if !response.text_blocks.is_empty() {
+                response.text_blocks.join("\n")
+            } else {
+                format!("[Using {} tools]", response.tool_uses.len())
+            };
+
+            messages.push(crate::ai::claude::Message {
+                role: "assistant".to_string(),
+                content: assistant_content,
+            });
+
+            // Add tool results as a user message
+            let tool_results_content = json!(tool_results).to_string();
+            messages.push(crate::ai::claude::Message {
+                role: "user".to_string(),
+                content: format!("Tool results:\n{}", tool_results_content),
+            });
+        }
+
+        Ok(accumulated_text.join("\n\n"))
     }
 
     /// Generate response text based on MCP integration status (deprecated)
@@ -416,9 +527,14 @@ impl acp::Agent for UniversalAgent {
                 content: user_message.clone(),
             });
 
-            // Call Claude API
-            info!("Calling Claude API ({} messages in history)", history.len());
-            match client.send_message(&messages).await {
+            // Get tool definitions
+            let tool_definitions = self.tools.get_tool_definitions();
+            let system_prompt = self.build_system_prompt();
+
+            // Call Claude API with tools
+            info!("Calling Claude API ({} messages, {} tools)", history.len(), tool_definitions.len());
+
+            match self.call_claude_with_tools(client, messages, tool_definitions, system_prompt).await {
                 Ok(response) => {
                     info!("Claude API response received ({} chars)", response.len());
                     response
