@@ -4,6 +4,7 @@
 //! intelligent, context-aware code completions.
 
 use anyhow::{Context, Result};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
@@ -48,6 +49,8 @@ struct ClaudeRequest {
     tools: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -121,6 +124,47 @@ pub struct ToolUse {
     pub input: Value,
 }
 
+/// Streaming event from Claude API
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+pub enum StreamEvent {
+    #[serde(rename = "message_start")]
+    MessageStart { message: StreamMessage },
+    #[serde(rename = "content_block_start")]
+    ContentBlockStart { index: usize, content_block: Value },
+    #[serde(rename = "content_block_delta")]
+    ContentBlockDelta { index: usize, delta: ContentDelta },
+    #[serde(rename = "content_block_stop")]
+    ContentBlockStop { index: usize },
+    #[serde(rename = "message_delta")]
+    MessageDelta { delta: Value },
+    #[serde(rename = "message_stop")]
+    MessageStop,
+    #[serde(rename = "ping")]
+    Ping,
+    #[serde(rename = "error")]
+    Error { error: Value },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamMessage {
+    pub id: String,
+    pub model: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+pub enum ContentDelta {
+    #[serde(rename = "text_delta")]
+    TextDelta { text: String },
+    #[serde(rename = "input_json_delta")]
+    InputJsonDelta { partial_json: String },
+}
+
+/// Callback type for streaming responses
+pub type StreamCallback = Box<dyn Fn(StreamEvent) -> Result<()> + Send + Sync>;
+
 impl ClaudeClient {
     /// Create a new Claude API client
     pub fn new(config: ClaudeConfig) -> Result<Self> {
@@ -177,6 +221,7 @@ impl ClaudeClient {
             messages: messages.to_vec(),
             tools,
             system,
+            stream: None, // Non-streaming request
         };
 
         let response = self
@@ -222,6 +267,147 @@ impl ClaudeClient {
             tool_uses,
             stop_reason: claude_response.stop_reason,
         })
+    }
+
+    /// Send a streaming message to Claude with tool support
+    ///
+    /// This method sends a request to Claude's streaming API and calls the provided
+    /// callback for each streaming event received. This allows for progressive
+    /// display of responses and real-time feedback.
+    pub async fn send_message_with_tools_streaming<F>(
+        &self,
+        messages: &[Message],
+        tools: Option<Vec<Value>>,
+        system: Option<String>,
+        mut callback: F,
+    ) -> Result<ClaudeToolResponse>
+    where
+        F: FnMut(StreamEvent) -> Result<()>,
+    {
+        let request = ClaudeRequest {
+            model: self.config.model.clone(),
+            max_tokens: self.config.max_tokens,
+            temperature: self.config.temperature,
+            messages: messages.to_vec(),
+            tools,
+            system,
+            stream: Some(true), // Enable streaming
+        };
+
+        let response = self
+            .http_client
+            .post("https://api.anthropic.com/v1/messages")
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send streaming request to Claude API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_body = response.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "Claude API returned error status {}: {}",
+                status,
+                error_body
+            ));
+        }
+
+        // Parse SSE stream
+        let mut text_blocks: Vec<String> = Vec::new();
+        let mut tool_uses: Vec<ToolUse> = Vec::new();
+        let mut current_text = String::new();
+        let mut stop_reason: Option<String> = None;
+
+        // Read response body as stream
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("Failed to read streaming response")?;
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&chunk_str);
+
+            // Process complete SSE events (separated by \n\n)
+            while let Some(event_end) = buffer.find("\n\n") {
+                let event_data = buffer[..event_end].to_string();
+                buffer = buffer[event_end + 2..].to_string();
+
+                // Parse SSE event
+                if let Some(event) = self.parse_sse_event(&event_data) {
+                    // Call user callback
+                    callback(event.clone())?;
+
+                    // Accumulate response
+                    match event {
+                        StreamEvent::ContentBlockDelta { delta, .. } => {
+                            if let ContentDelta::TextDelta { text } = delta {
+                                current_text.push_str(&text);
+                            }
+                        }
+                        StreamEvent::ContentBlockStop { .. } => {
+                            if !current_text.is_empty() {
+                                text_blocks.push(current_text.clone());
+                                current_text.clear();
+                            }
+                        }
+                        StreamEvent::MessageDelta { delta } => {
+                            if let Some(reason) = delta.get("stop_reason").and_then(|v| v.as_str()) {
+                                stop_reason = Some(reason.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Final accumulated text
+        if !current_text.is_empty() {
+            text_blocks.push(current_text);
+        }
+
+        Ok(ClaudeToolResponse {
+            text_blocks,
+            tool_uses,
+            stop_reason,
+        })
+    }
+
+    /// Parse a single SSE event from the stream
+    fn parse_sse_event(&self, event_data: &str) -> Option<StreamEvent> {
+        // SSE format: "event: message_start\ndata: {...}\n"
+        let mut event_type: Option<&str> = None;
+        let mut data: Option<&str> = None;
+
+        for line in event_data.lines() {
+            if let Some(evt) = line.strip_prefix("event: ") {
+                event_type = Some(evt.trim());
+            } else if let Some(d) = line.strip_prefix("data: ") {
+                data = Some(d.trim());
+            }
+        }
+
+        // Parse the data JSON
+        if let Some(data_str) = data {
+            if let Ok(mut event_json) = serde_json::from_str::<Value>(data_str) {
+                // Add type field from SSE event type if present
+                if let Some(evt_type) = event_type {
+                    if event_json.is_object() {
+                        event_json.as_object_mut().unwrap().insert(
+                            "type".to_string(),
+                            Value::String(evt_type.to_string()),
+                        );
+                    }
+                }
+
+                // Try to deserialize into StreamEvent
+                if let Ok(stream_event) = serde_json::from_value::<StreamEvent>(event_json) {
+                    return Some(stream_event);
+                }
+            }
+        }
+
+        None
     }
 
     /// Get code completions from Claude
