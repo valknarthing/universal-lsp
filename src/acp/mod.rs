@@ -25,9 +25,11 @@ use dashmap::DashMap;
 
 pub mod tools;
 pub mod context;
+pub mod persistence;
 
 use tools::ToolRegistry;
 use context::ContextProvider;
+use persistence::{SessionPersistence, PersistedSession, PersistedMessage};
 
 /// Universal LSP ACP Agent
 ///
@@ -52,6 +54,8 @@ pub struct UniversalAgent {
     context: Arc<ContextProvider>,
     /// Cancellation tokens per session (session_id -> watch::Receiver<bool>)
     cancellation_tokens: Arc<DashMap<String, watch::Sender<bool>>>,
+    /// Session persistence manager for conversation history
+    persistence: SessionPersistence,
 }
 
 /// Conversation message for history tracking
@@ -123,6 +127,13 @@ impl UniversalAgent {
         // Initialize context provider
         let context = Arc::new(ContextProvider::new(workspace_root.clone()));
 
+        // Initialize session persistence
+        let persistence = SessionPersistence::new()
+            .unwrap_or_else(|e| {
+                error!("Failed to initialize session persistence: {}", e);
+                SessionPersistence::default()
+            });
+
         info!(
             "UniversalAgent created (Claude: {}, tools: {}, workspace: {})",
             if claude_client.is_some() { "enabled" } else { "disabled" },
@@ -140,6 +151,7 @@ impl UniversalAgent {
             tools,
             context,
             cancellation_tokens: Arc::new(DashMap::new()),
+            persistence,
         }
     }
 
@@ -175,6 +187,13 @@ impl UniversalAgent {
         // Initialize context provider
         let context = Arc::new(ContextProvider::new(workspace_root.clone()));
 
+        // Initialize session persistence
+        let persistence = SessionPersistence::new()
+            .unwrap_or_else(|e| {
+                error!("Failed to initialize session persistence: {}", e);
+                SessionPersistence::default()
+            });
+
         info!(
             "UniversalAgent created (Claude: {}, MCP: {}, tools: {}, workspace: {})",
             if claude_client.is_some() { "enabled" } else { "disabled" },
@@ -193,6 +212,7 @@ impl UniversalAgent {
             tools,
             context,
             cancellation_tokens: Arc::new(DashMap::new()),
+            persistence,
         }
     }
 
@@ -650,7 +670,35 @@ impl acp::Agent for UniversalAgent {
         &self,
         arguments: acp::LoadSessionRequest,
     ) -> Result<acp::LoadSessionResponse, acp::Error> {
-        info!("ACP agent loading session: {:?}", arguments);
+        let session_id_str = arguments.session_id.0.to_string();
+        info!("ACP agent loading session: {}", session_id_str);
+
+        // Try to load persisted session from disk
+        match self.persistence.load_session(&session_id_str) {
+            Ok(persisted_session) => {
+                info!(
+                    "Loaded session {} with {} messages from disk",
+                    session_id_str,
+                    persisted_session.messages.len()
+                );
+
+                // Restore conversation history to memory
+                let conversation_messages: Vec<ConversationMessage> = persisted_session
+                    .messages
+                    .iter()
+                    .map(|m| m.to_conversation_message())
+                    .collect();
+
+                self.sessions.insert(session_id_str.clone(), conversation_messages);
+
+                info!("Session {} restored to memory", session_id_str);
+            }
+            Err(e) => {
+                warn!("Could not load session {}: {}", session_id_str, e);
+                info!("Starting fresh session");
+            }
+        }
+
         Ok(acp::LoadSessionResponse {
             modes: None,
             meta: None,
@@ -749,17 +797,59 @@ impl acp::Agent for UniversalAgent {
         };
 
         // 4. Store in conversation history
-        history.push(ConversationMessage {
+        let user_msg = ConversationMessage {
             role: "user".to_string(),
             content: user_message,
             timestamp: std::time::SystemTime::now(),
-        });
+        };
 
-        history.push(ConversationMessage {
+        let assistant_msg = ConversationMessage {
             role: "assistant".to_string(),
             content: response_text.clone(),
             timestamp: std::time::SystemTime::now(),
-        });
+        };
+
+        history.push(user_msg);
+        history.push(assistant_msg);
+
+        // 4.5. Save session to disk for persistence
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        // Convert in-memory history to persisted format
+        let persisted_messages: Vec<PersistedMessage> = history
+            .iter()
+            .map(|m| PersistedMessage::from(m))
+            .collect();
+
+        // Calculate estimated tokens
+        let estimated_tokens: usize = persisted_messages
+            .iter()
+            .map(|m| m.estimated_tokens)
+            .sum();
+
+        let persisted_session = PersistedSession {
+            session_id: session_id_str.clone(),
+            cwd: self.workspace_root.clone(),
+            messages: persisted_messages,
+            created_at: current_time,
+            updated_at: current_time,
+            estimated_tokens,
+        };
+
+        // Save to disk (non-blocking, log errors but don't fail)
+        if let Err(e) = self.persistence.save_session(&persisted_session) {
+            error!("Failed to save session {}: {}", session_id_str, e);
+        } else {
+            info!(
+                "Saved session {} ({} messages, ~{} tokens)",
+                session_id_str,
+                persisted_session.messages.len(),
+                estimated_tokens
+            );
+        }
 
         // 5. Send response as notification
         let (tx, rx) = oneshot::channel();
