@@ -203,6 +203,15 @@ impl LanguageServer for UniversalLsp {
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        "universal-lsp.explainCode".to_string(),
+                        "universal-lsp.optimizeCode".to_string(),
+                        "universal-lsp.generateTests".to_string(),
+                        "universal-lsp.generateDocs".to_string(),
+                    ],
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
@@ -958,6 +967,61 @@ impl LanguageServer for UniversalLsp {
         }
     }
 
+    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
+        let command = params.command.as_str();
+
+        self.client
+            .log_message(MessageType::INFO, format!("Executing command: {}", command))
+            .await;
+
+        // Extract URI and range from arguments
+        let (uri_str, range) = match Self::parse_command_args(&params.arguments) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                self.client
+                    .log_message(MessageType::ERROR, format!("Failed to parse command arguments: {}", e))
+                    .await;
+                return Ok(None);
+            }
+        };
+
+        // Get document content
+        let content = match self.documents.get(&uri_str) {
+            Some(content) => content.clone(),
+            None => {
+                self.client
+                    .log_message(MessageType::ERROR, format!("Document not found: {}", uri_str))
+                    .await;
+                return Ok(None);
+            }
+        };
+
+        // Extract selected text
+        let selected_text = Self::extract_text_from_range(&content, range);
+
+        // Execute the appropriate command
+        match command {
+            "universal-lsp.explainCode" => {
+                self.execute_explain_code(&uri_str, &selected_text, &content).await
+            }
+            "universal-lsp.optimizeCode" => {
+                self.execute_optimize_code(&uri_str, &selected_text, &content, range).await
+            }
+            "universal-lsp.generateTests" => {
+                self.execute_generate_tests(&uri_str, &selected_text, &content).await
+            }
+            "universal-lsp.generateDocs" => {
+                self.execute_generate_docs(&uri_str, &selected_text, &content, range).await
+            }
+            _ => {
+                self.client
+                    .log_message(MessageType::ERROR, format!("Unknown command: {}", command))
+                    .await;
+                Ok(None)
+            }
+        }
+    }
+
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
@@ -1049,6 +1113,263 @@ impl LanguageServer for UniversalLsp {
             }
         } else {
             Ok(None)
+        }
+    }
+}
+
+// ========================================================================
+// AI Command Execution Helpers (Phase 5.2)
+// ========================================================================
+
+impl UniversalLsp {
+    /// Parse command arguments to extract URI and Range
+    fn parse_command_args(args: &Vec<serde_json::Value>) -> Result<(String, Range)> {
+        use tower_lsp::jsonrpc::Error as JsonRpcError;
+
+        if args.len() < 2 {
+            return Err(JsonRpcError::invalid_params("Expected at least 2 arguments (uri, range)"));
+        }
+
+        let uri_str = args[0]
+            .as_str()
+            .ok_or_else(|| JsonRpcError::invalid_params("First argument must be a string (URI)"))?
+            .to_string();
+
+        let range: Range = serde_json::from_value(args[1].clone())
+            .map_err(|e| JsonRpcError::invalid_params(format!("Failed to parse range: {}", e)))?;
+
+        Ok((uri_str, range))
+    }
+
+    /// Extract text from a range in the document
+    fn extract_text_from_range(content: &str, range: Range) -> String {
+        let start_byte = position_to_byte(content, range.start);
+        let end_byte = position_to_byte(content, range.end);
+
+        if start_byte < end_byte && end_byte <= content.len() {
+            content[start_byte..end_byte].to_string()
+        } else {
+            String::new()
+        }
+    }
+
+    /// Execute "Explain Code" command
+    async fn execute_explain_code(
+        &self,
+        uri: &str,
+        selected_text: &str,
+        _full_content: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        if selected_text.trim().is_empty() {
+            self.client
+                .show_message(MessageType::WARNING, "No code selected to explain")
+                .await;
+            return Ok(None);
+        }
+
+        let lang = detect_language(uri);
+        let prompt = format!(
+            "Explain this {} code in detail. Focus on what it does, how it works, and any important patterns or gotchas:\n\n```{}\n{}\n```",
+            lang, lang, selected_text
+        );
+
+        self.call_claude_and_show_result("Code Explanation", &prompt).await
+    }
+
+    /// Execute "Optimize Code" command
+    async fn execute_optimize_code(
+        &self,
+        uri: &str,
+        selected_text: &str,
+        full_content: &str,
+        range: Range,
+    ) -> Result<Option<serde_json::Value>> {
+        if selected_text.trim().is_empty() {
+            self.client
+                .show_message(MessageType::WARNING, "No code selected to optimize")
+                .await;
+            return Ok(None);
+        }
+
+        let lang = detect_language(uri);
+        let prompt = format!(
+            "Optimize this {} code for performance, readability, and best practices. Provide the optimized version and explain the improvements:\n\n```{}\n{}\n```",
+            lang, lang, selected_text
+        );
+
+        // Get optimized code from Claude
+        match self.call_claude_for_edit(&prompt).await {
+            Ok(optimized_code) => {
+                // Apply the edit automatically
+                let uri_parsed = match Url::parse(uri) {
+                    Ok(u) => u,
+                    Err(e) => {
+                        self.client
+                            .show_message(MessageType::ERROR, format!("Invalid URI: {}", e))
+                            .await;
+                        return Ok(None);
+                    }
+                };
+                self.apply_text_edit(&uri_parsed, range, &optimized_code).await;
+                Ok(Some(serde_json::json!({ "success": true, "optimized": true })))
+            }
+            Err(e) => {
+                self.client
+                    .show_message(MessageType::ERROR, format!("Failed to optimize code: {}", e))
+                    .await;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Execute "Generate Tests" command
+    async fn execute_generate_tests(
+        &self,
+        uri: &str,
+        selected_text: &str,
+        _full_content: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        if selected_text.trim().is_empty() {
+            self.client
+                .show_message(MessageType::WARNING, "No code selected to generate tests for")
+                .await;
+            return Ok(None);
+        }
+
+        let lang = detect_language(uri);
+        let prompt = format!(
+            "Generate comprehensive unit tests for this {} code. Include edge cases, error cases, and document each test:\n\n```{}\n{}\n```",
+            lang, lang, selected_text
+        );
+
+        self.call_claude_and_show_result("Generated Tests", &prompt).await
+    }
+
+    /// Execute "Generate Documentation" command
+    async fn execute_generate_docs(
+        &self,
+        uri: &str,
+        selected_text: &str,
+        full_content: &str,
+        range: Range,
+    ) -> Result<Option<serde_json::Value>> {
+        if selected_text.trim().is_empty() {
+            self.client
+                .show_message(MessageType::WARNING, "No code selected to document")
+                .await;
+            return Ok(None);
+        }
+
+        let lang = detect_language(uri);
+        let prompt = format!(
+            "Generate comprehensive documentation for this {} code. Use appropriate doc comment syntax for the language:\n\n```{}\n{}\n```",
+            lang, lang, selected_text
+        );
+
+        // Get documentation from Claude
+        match self.call_claude_for_edit(&prompt).await {
+            Ok(doc_text) => {
+                // Insert documentation before the selected code
+                let uri_parsed = match Url::parse(uri) {
+                    Ok(u) => u,
+                    Err(e) => {
+                        self.client
+                            .show_message(MessageType::ERROR, format!("Invalid URI: {}", e))
+                            .await;
+                        return Ok(None);
+                    }
+                };
+                let insert_range = Range {
+                    start: range.start,
+                    end: range.start,
+                };
+                self.apply_text_edit(&uri_parsed, insert_range, &format!("{}\n", doc_text)).await;
+                Ok(Some(serde_json::json!({ "success": true, "documented": true })))
+            }
+            Err(e) => {
+                self.client
+                    .show_message(MessageType::ERROR, format!("Failed to generate docs: {}", e))
+                    .await;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Call Claude API and show result as a message
+    async fn call_claude_and_show_result(
+        &self,
+        title: &str,
+        prompt: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        if let Some(client) = &self.claude_client {
+            match client.send_message(&[ai::claude::Message {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }]).await {
+                Ok(response) => {
+                    // Show result to user
+                    self.client
+                        .show_message(MessageType::INFO, format!("{}\n\n{}", title, response))
+                        .await;
+                    Ok(Some(serde_json::json!({ "success": true, "result": response })))
+                }
+                Err(e) => {
+                    self.client
+                        .show_message(MessageType::ERROR, format!("Claude API error: {}", e))
+                        .await;
+                    Ok(None)
+                }
+            }
+        } else {
+            self.client
+                .show_message(MessageType::WARNING, "Claude API not available. Set ANTHROPIC_API_KEY to enable AI features.")
+                .await;
+            Ok(None)
+        }
+    }
+
+    /// Call Claude API for code edit/generation
+    async fn call_claude_for_edit(&self, prompt: &str) -> std::result::Result<String, String> {
+        if let Some(client) = &self.claude_client {
+            client.send_message(&[ai::claude::Message {
+                role: "user".to_string(),
+                content: prompt.to_string(),
+            }]).await.map_err(|e| format!("Claude API error: {}", e))
+        } else {
+            Err("Claude API not available. Set ANTHROPIC_API_KEY to enable AI features.".to_string())
+        }
+    }
+
+    /// Apply a text edit to a document
+    async fn apply_text_edit(&self, uri: &Url, range: Range, new_text: &str) {
+        let edit = WorkspaceEdit {
+            changes: Some(std::collections::HashMap::from([(
+                uri.clone(),
+                vec![TextEdit {
+                    range,
+                    new_text: new_text.to_string(),
+                }],
+            )])),
+            ..Default::default()
+        };
+
+        match self.client.apply_edit(edit).await {
+            Ok(response) => {
+                if response.applied {
+                    self.client
+                        .show_message(MessageType::INFO, "Code updated successfully!")
+                        .await;
+                } else {
+                    self.client
+                        .show_message(MessageType::WARNING, "Edit was not applied")
+                        .await;
+                }
+            }
+            Err(e) => {
+                self.client
+                    .show_message(MessageType::ERROR, format!("Failed to apply edit: {}", e))
+                    .await;
+            }
         }
     }
 }
