@@ -742,7 +742,63 @@ impl LanguageServer for UniversalLsp {
                 if let Ok(tree) = parser.parse(&content, uri.as_str()) {
                     let claude_client = self.claude_client.as_deref();
                     match diagnostics::compute_diagnostics(&tree, &content, &lang_lowercase, claude_client).await {
-                        Ok(diags) => {
+                        Ok(mut diags) => {
+                            // Enhance diagnostics with MCP validation
+                            if let Some(coordinator) = &self.coordinator_client {
+                                let mcp_request = McpRequest {
+                                    request_type: "diagnostics".to_string(),
+                                    uri: uri.to_string(),
+                                    position: lsp_position_to_mcp(0, 0),
+                                    context: Some(content.clone()),
+                                };
+
+                                // Query all configured MCP servers for diagnostic suggestions
+                                for server_name in self.config.mcp.servers.keys() {
+                                    match coordinator.query(server_name, mcp_request.clone()).await {
+                                        Ok(response) => {
+                                            // Convert MCP suggestions to LSP diagnostics
+                                            for suggestion in response.suggestions {
+                                                diags.push(Diagnostic {
+                                                    range: Range {
+                                                        start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                                                        end: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                                                    },
+                                                    severity: Some(DiagnosticSeverity::HINT),
+                                                    code: None,
+                                                    source: Some(format!("mcp:{}", server_name)),
+                                                    message: suggestion,
+                                                    related_information: None,
+                                                    tags: None,
+                                                    code_description: None,
+                                                    data: None,
+                                                });
+                                            }
+
+                                            // Add documentation as info diagnostic if present
+                                            if let Some(doc) = response.documentation {
+                                                diags.push(Diagnostic {
+                                                    range: Range {
+                                                        start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                                                        end: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                                                    },
+                                                    severity: Some(DiagnosticSeverity::INFORMATION),
+                                                    code: None,
+                                                    source: Some(format!("mcp:{}", server_name)),
+                                                    message: doc,
+                                                    related_information: None,
+                                                    tags: None,
+                                                    code_description: None,
+                                                    data: None,
+                                                });
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::debug!("MCP diagnostics query to {} failed: {}", server_name, e);
+                                        }
+                                    }
+                                }
+                            }
+
                             self.client.publish_diagnostics(uri, diags, None).await;
                         }
                         Err(e) => {
@@ -776,7 +832,63 @@ impl LanguageServer for UniversalLsp {
                         // Compute diagnostics
                         let claude_client = self.claude_client.as_deref();
                         match diagnostics::compute_diagnostics(&tree, &content, &lang_lowercase, claude_client).await {
-                            Ok(diags) => {
+                            Ok(mut diags) => {
+                                // Enhance diagnostics with MCP validation
+                                if let Some(coordinator) = &self.coordinator_client {
+                                    let mcp_request = McpRequest {
+                                        request_type: "diagnostics".to_string(),
+                                        uri: uri.to_string(),
+                                        position: lsp_position_to_mcp(0, 0),
+                                        context: Some(content.clone()),
+                                    };
+
+                                    // Query all configured MCP servers for diagnostic suggestions
+                                    for server_name in self.config.mcp.servers.keys() {
+                                        match coordinator.query(server_name, mcp_request.clone()).await {
+                                            Ok(response) => {
+                                                // Convert MCP suggestions to LSP diagnostics
+                                                for suggestion in response.suggestions {
+                                                    diags.push(Diagnostic {
+                                                        range: Range {
+                                                            start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                                                            end: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                                                        },
+                                                        severity: Some(DiagnosticSeverity::HINT),
+                                                        code: None,
+                                                        source: Some(format!("mcp:{}", server_name)),
+                                                        message: suggestion,
+                                                        related_information: None,
+                                                        tags: None,
+                                                        code_description: None,
+                                                        data: None,
+                                                    });
+                                                }
+
+                                                // Add documentation as info diagnostic if present
+                                                if let Some(doc) = response.documentation {
+                                                    diags.push(Diagnostic {
+                                                        range: Range {
+                                                            start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                                                            end: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                                                        },
+                                                        severity: Some(DiagnosticSeverity::INFORMATION),
+                                                        code: None,
+                                                        source: Some(format!("mcp:{}", server_name)),
+                                                        message: doc,
+                                                        related_information: None,
+                                                        tags: None,
+                                                        code_description: None,
+                                                        data: None,
+                                                    });
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::debug!("MCP diagnostics query to {} failed: {}", server_name, e);
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // Publish diagnostics to client
                                 self.client.publish_diagnostics(uri, diags, None).await;
                             }
