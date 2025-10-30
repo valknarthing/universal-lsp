@@ -66,6 +66,7 @@ struct UniversalLsp {
     code_lens_provider: Arc<CodeLensProvider>,
     workspace_manager: Arc<WorkspaceManager>,
     text_sync_manager: Arc<TextSyncManager>,
+    inline_completion_manager: Arc<universal_lsp::inline_completion::InlineCompletionManager>,
 }
 
 impl UniversalLsp {
@@ -163,6 +164,7 @@ impl UniversalLsp {
             code_lens_provider: Arc::new(CodeLensProvider::new()),
             workspace_manager: Arc::new(WorkspaceManager::new()),
             text_sync_manager: Arc::new(TextSyncManager::new()),
+            inline_completion_manager: Arc::new(universal_lsp::inline_completion::InlineCompletionManager::new()),
         }
     }
 }
@@ -481,30 +483,81 @@ impl LanguageServer for UniversalLsp {
                     None
                 };
 
-                let completion_context = CompletionContext {
-                    language: lang.to_string(),
-                    file_path: uri.path().to_string(),
-                    prefix,
-                    suffix,
-                    context: None,
-                };
+                // Check cache first
+                if let Some(cached_completions) = self.inline_completion_manager.get_cached(uri.as_str(), &prefix, &suffix) {
+                    tracing::debug!("Using cached completions for {}", uri);
+                    for (idx, text) in cached_completions.iter().enumerate() {
+                        items.push(CompletionItem {
+                            label: text.clone(),
+                            kind: Some(CompletionItemKind::TEXT),
+                            detail: Some("Claude AI (cached)".to_string()),
+                            insert_text: Some(text.clone()),
+                            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                            sort_text: Some(format!("0_claude_{}", idx)),
+                            ..Default::default()
+                        });
+                    }
+                } else {
+                    // Check if we should debounce
+                    if self.inline_completion_manager.should_debounce(uri.as_str()).await {
+                        tracing::debug!("Debouncing completion request for {}", uri);
+                        self.inline_completion_manager.wait_debounce().await;
+                    }
 
-                match claude_client.get_completions(&completion_context).await {
-                    Ok(suggestions) => {
-                        for suggestion in suggestions {
-                            items.push(CompletionItem {
-                                label: suggestion.text.clone(),
-                                kind: Some(CompletionItemKind::TEXT),
-                                detail: suggestion.detail.or(Some("Claude AI".to_string())),
-                                insert_text: Some(suggestion.text),
-                                sort_text: Some(format!("0_claude_{}", suggestion.confidence)),
-                                ..Default::default()
-                            });
+                    // Update last request timestamp
+                    self.inline_completion_manager.update_last_request(uri.to_string()).await;
+
+                    // Create cancellation token
+                    let cancel_rx = self.inline_completion_manager.create_cancellation_token(uri.to_string());
+
+                    let completion_context = CompletionContext {
+                        language: lang.to_string(),
+                        file_path: uri.path().to_string(),
+                        prefix: prefix.clone(),
+                        suffix: suffix.clone(),
+                        context: None,
+                    };
+
+                    // Check cancellation before making request
+                    if !self.inline_completion_manager.is_cancelled(uri.as_str(), &cancel_rx) {
+                        match claude_client.get_completions(&completion_context).await {
+                            Ok(suggestions) => {
+                                // Check cancellation after request
+                                if !self.inline_completion_manager.is_cancelled(uri.as_str(), &cancel_rx) {
+                                    let mut cached_texts = Vec::new();
+
+                                    for suggestion in suggestions {
+                                        items.push(CompletionItem {
+                                            label: suggestion.text.clone(),
+                                            kind: Some(CompletionItemKind::TEXT),
+                                            detail: suggestion.detail.or(Some("Claude AI".to_string())),
+                                            insert_text: Some(suggestion.text.clone()),
+                                            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                                            sort_text: Some(format!("0_claude_{}", suggestion.confidence)),
+                                            ..Default::default()
+                                        });
+                                        cached_texts.push(suggestion.text);
+                                    }
+
+                                    // Cache the completions
+                                    if !cached_texts.is_empty() {
+                                        self.inline_completion_manager.cache_completion(
+                                            uri.to_string(),
+                                            &prefix,
+                                            &suffix,
+                                            cached_texts,
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!("Claude completion failed: {}", e);
+                            }
                         }
                     }
-                    Err(e) => {
-                        tracing::debug!("Claude completion failed: {}", e);
-                    }
+
+                    // Clean up cancellation token
+                    self.inline_completion_manager.remove_cancellation_token(uri.as_str());
                 }
             }
         }
