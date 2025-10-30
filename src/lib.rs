@@ -330,6 +330,7 @@ pub mod language;
 pub mod mcp;
 pub mod pipeline;
 pub mod proxy;
+pub mod signature_help;
 pub mod text_sync;
 pub mod tree_sitter;
 pub mod workspace;

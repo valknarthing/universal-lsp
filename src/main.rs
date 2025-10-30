@@ -20,6 +20,7 @@ mod language;
 mod mcp;
 mod pipeline;
 mod proxy;
+mod signature_help;
 mod text_sync;
 mod tree_sitter;
 mod workspace;
@@ -35,6 +36,7 @@ use language::detect_language;
 use mcp::McpRequest;
 use pipeline::{McpPipeline, merge_mcp_responses, lsp_position_to_mcp};
 use proxy::{ProxyConfig, ProxyManager};
+use signature_help::SignatureHelpProvider;
 use text_sync::TextSyncManager;
 use tree_sitter::TreeSitterParser;
 use workspace::WorkspaceManager;
@@ -52,6 +54,7 @@ struct UniversalLsp {
     diagnostic_provider: Arc<DiagnosticProvider>,
     code_action_provider: Arc<CodeActionProvider>,
     formatting_provider: Arc<FormattingProvider>,
+    signature_help_provider: Arc<SignatureHelpProvider>,
     workspace_manager: Arc<WorkspaceManager>,
     text_sync_manager: Arc<TextSyncManager>,
 }
@@ -145,6 +148,7 @@ impl UniversalLsp {
             diagnostic_provider: Arc::new(DiagnosticProvider::new()),
             code_action_provider: Arc::new(CodeActionProvider::with_claude(claude_client)),
             formatting_provider: Arc::new(FormattingProvider::new()),
+            signature_help_provider: Arc::new(SignatureHelpProvider::new()),
             workspace_manager: Arc::new(WorkspaceManager::new()),
             text_sync_manager: Arc::new(TextSyncManager::new()),
         }
@@ -178,6 +182,11 @@ impl LanguageServer for UniversalLsp {
                 )),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions::default()),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
@@ -804,6 +813,21 @@ impl LanguageServer for UniversalLsp {
         if let Some(content) = self.documents.get(uri.as_str()) {
             match self.code_action_provider.get_actions(uri, range, &content, diagnostics, lang) {
                 Ok(actions) => Ok(Some(actions)),
+                Err(_) => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let lang = detect_language(uri.path());
+
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            match self.signature_help_provider.get_signature_help(&content, position, lang) {
+                Ok(help) => Ok(help),
                 Err(_) => Ok(None),
             }
         } else {
