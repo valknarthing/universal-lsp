@@ -227,7 +227,7 @@ impl TreeSitterParser {
             let name = &source[node.byte_range()];
 
             // Search for definition
-            if let Some(def_node) = self.find_definition_node(tree.root_node(), name, lang) {
+            if let Some(def_node) = self.find_definition_node(tree.root_node(), name, lang, source.as_bytes()) {
                 let range = self.node_to_range(&def_node, source)?;
                 return Ok(Some(Definition {
                     name: name.to_string(),
@@ -320,7 +320,8 @@ impl TreeSitterParser {
         &self,
         node: tree_sitter::Node<'a>,
         name: &str,
-        lang: &str
+        lang: &str,
+        source: &'a [u8],
     ) -> Option<tree_sitter::Node<'a>> {
         let definition_kinds = match lang {
             "javascript" | "typescript" | "tsx" => vec![
@@ -348,7 +349,7 @@ impl TreeSitterParser {
                 // Check if this node defines our identifier
                 for child in n.children(&mut n.walk()) {
                     if (child.kind() == "identifier" || child.kind() == "type_identifier")
-                        && child.utf8_text(&[]).ok() == Some(name) {
+                        && child.utf8_text(source).ok() == Some(name) {
                         return true;
                     }
                 }
@@ -398,6 +399,147 @@ impl TreeSitterParser {
         }
 
         None
+    }
+
+    /// Extract rich hover information for a node
+    pub fn extract_hover_info(&self, node: tree_sitter::Node, source: &str, lang: &str) -> Result<String> {
+        let mut info = String::new();
+
+        // Try to find the parent definition node
+        let mut current = node;
+        let mut definition_node = None;
+
+        while let Some(parent) = current.parent() {
+            match lang {
+                "python" => {
+                    if parent.kind() == "function_definition" || parent.kind() == "class_definition" {
+                        definition_node = Some(parent);
+                        break;
+                    }
+                }
+                "javascript" | "typescript" | "tsx" => {
+                    if parent.kind() == "function_declaration"
+                        || parent.kind() == "class_declaration"
+                        || parent.kind() == "method_definition" {
+                        definition_node = Some(parent);
+                        break;
+                    }
+                }
+                "rust" => {
+                    if parent.kind() == "function_item"
+                        || parent.kind() == "struct_item"
+                        || parent.kind() == "impl_item" {
+                        definition_node = Some(parent);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            current = parent;
+        }
+
+        if let Some(def_node) = definition_node {
+            // Extract function/class signature
+            match lang {
+                "python" => {
+                    if def_node.kind() == "function_definition" {
+                        // Get function name
+                        if let Some(name_node) = def_node.child_by_field_name("name") {
+                            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Function:** `{}`\n\n", name));
+                            }
+                        }
+
+                        // Get parameters
+                        if let Some(params_node) = def_node.child_by_field_name("parameters") {
+                            if let Ok(params_text) = params_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Parameters:** `{}`\n\n", params_text));
+                            }
+                        }
+
+                        // Get docstring if available
+                        if let Some(body) = def_node.child_by_field_name("body") {
+                            let mut cursor = body.walk();
+                            for child in body.children(&mut cursor) {
+                                if child.kind() == "expression_statement" {
+                                    if let Some(string_node) = child.child(0) {
+                                        if string_node.kind() == "string" {
+                                            if let Ok(docstring) = string_node.utf8_text(source.as_bytes()) {
+                                                // Remove quotes and clean up
+                                                let cleaned = docstring.trim_matches(|c| c == '"' || c == '\'');
+                                                info.push_str(&format!("**Documentation:**\n{}\n\n", cleaned));
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if def_node.kind() == "class_definition" {
+                        if let Some(name_node) = def_node.child_by_field_name("name") {
+                            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Class:** `{}`\n\n", name));
+                            }
+                        }
+                    }
+                }
+                "javascript" | "typescript" | "tsx" => {
+                    if def_node.kind() == "function_declaration" || def_node.kind() == "method_definition" {
+                        if let Some(name_node) = def_node.child_by_field_name("name") {
+                            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Function:** `{}`\n\n", name));
+                            }
+                        }
+
+                        if let Some(params_node) = def_node.child_by_field_name("parameters") {
+                            if let Ok(params_text) = params_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Parameters:** `{}`\n\n", params_text));
+                            }
+                        }
+                    } else if def_node.kind() == "class_declaration" {
+                        if let Some(name_node) = def_node.child_by_field_name("name") {
+                            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Class:** `{}`\n\n", name));
+                            }
+                        }
+                    }
+                }
+                "rust" => {
+                    if def_node.kind() == "function_item" {
+                        if let Some(name_node) = def_node.child_by_field_name("name") {
+                            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Function:** `{}`\n\n", name));
+                            }
+                        }
+
+                        if let Some(params_node) = def_node.child_by_field_name("parameters") {
+                            if let Ok(params_text) = params_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Parameters:** `{}`\n\n", params_text));
+                            }
+                        }
+                    } else if def_node.kind() == "struct_item" {
+                        if let Some(name_node) = def_node.child_by_field_name("name") {
+                            if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                                info.push_str(&format!("**Struct:** `{}`\n\n", name));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            // Show the node's own type
+            let node_text = node.utf8_text(source.as_bytes()).unwrap_or("?");
+            info.push_str(&format!("**Symbol:** `{}`\n", node_text));
+            info.push_str(&format!("**Type:** `{}`", node.kind()));
+        } else {
+            // Fallback to basic info
+            let node_text = node.utf8_text(source.as_bytes()).unwrap_or("?");
+            info.push_str(&format!("**Symbol:** `{}`\n", node_text));
+            info.push_str(&format!("**Type:** `{}`", node.kind()));
+        }
+
+        Ok(info)
     }
 
     // === Language-specific symbol extraction ===

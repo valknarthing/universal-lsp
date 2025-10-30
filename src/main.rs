@@ -240,17 +240,23 @@ impl LanguageServer for UniversalLsp {
                                     tracing::debug!("Byte offset: {}", byte_offset);
 
                                     if let Some(node) = tree.root_node().descendant_for_byte_range(byte_offset, byte_offset) {
-                                        // Get symbol info
-                                        let node_text = &content[node.byte_range()];
-                                        let kind = node.kind();
+                                        tracing::debug!("Found node: kind='{}'", node.kind());
 
-                                        tracing::debug!("Found node: text='{}', kind='{}'", node_text, kind);
-
-                                        hover_text = format!(
-                                            "{}\n\nSymbol: {}\nType: {}\nPosition: {}:{}",
-                                            hover_text, node_text, kind,
-                                            position.line, position.character
-                                        );
+                                        // Extract rich hover information
+                                        match parser.extract_hover_info(node, &content, &lang_lowercase) {
+                                            Ok(rich_info) => {
+                                                hover_text = format!("Language: {}\n\n{}", lang, rich_info);
+                                            }
+                                            Err(e) => {
+                                                tracing::debug!("Failed to extract hover info: {:?}", e);
+                                                // Fallback to basic info
+                                                let node_text = &content[node.byte_range()];
+                                                hover_text = format!(
+                                                    "{}\n\nSymbol: {}\nType: {}",
+                                                    hover_text, node_text, node.kind()
+                                                );
+                                            }
+                                        }
                                     } else {
                                         tracing::debug!("No node found at byte offset {}", byte_offset);
                                     }
