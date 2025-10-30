@@ -20,6 +20,7 @@ mod language;
 mod mcp;
 mod pipeline;
 mod proxy;
+mod semantic_tokens;
 mod signature_help;
 mod text_sync;
 mod tree_sitter;
@@ -36,6 +37,7 @@ use language::detect_language;
 use mcp::McpRequest;
 use pipeline::{McpPipeline, merge_mcp_responses, lsp_position_to_mcp};
 use proxy::{ProxyConfig, ProxyManager};
+use semantic_tokens::SemanticTokensProvider;
 use signature_help::SignatureHelpProvider;
 use text_sync::TextSyncManager;
 use tree_sitter::TreeSitterParser;
@@ -54,6 +56,7 @@ struct UniversalLsp {
     diagnostic_provider: Arc<DiagnosticProvider>,
     code_action_provider: Arc<CodeActionProvider>,
     formatting_provider: Arc<FormattingProvider>,
+    semantic_tokens_provider: Arc<SemanticTokensProvider>,
     signature_help_provider: Arc<SignatureHelpProvider>,
     workspace_manager: Arc<WorkspaceManager>,
     text_sync_manager: Arc<TextSyncManager>,
@@ -148,6 +151,7 @@ impl UniversalLsp {
             diagnostic_provider: Arc::new(DiagnosticProvider::new()),
             code_action_provider: Arc::new(CodeActionProvider::with_claude(claude_client)),
             formatting_provider: Arc::new(FormattingProvider::new()),
+            semantic_tokens_provider: Arc::new(SemanticTokensProvider::new()),
             signature_help_provider: Arc::new(SignatureHelpProvider::new()),
             workspace_manager: Arc::new(WorkspaceManager::new()),
             text_sync_manager: Arc::new(TextSyncManager::new()),
@@ -193,6 +197,16 @@ impl LanguageServer for UniversalLsp {
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensProvider::legend(),
+                            range: Some(false),
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            work_done_progress_options: WorkDoneProgressOptions::default(),
+                        }
+                    )
+                ),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -860,6 +874,24 @@ impl LanguageServer for UniversalLsp {
         if let Some(content) = self.documents.get(uri.as_str()) {
             match self.formatting_provider.format_range(&content, range, lang, uri) {
                 Ok(edits) => Ok(Some(edits)),
+                Err(_) => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let uri = &params.text_document.uri;
+        let lang = detect_language(uri.path());
+
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            match self.semantic_tokens_provider.get_semantic_tokens(&content, lang) {
+                Ok(Some(tokens)) => Ok(Some(SemanticTokensResult::Tokens(tokens))),
+                Ok(None) => Ok(None),
                 Err(_) => Ok(None),
             }
         } else {
