@@ -703,22 +703,67 @@ impl LanguageServer for UniversalLsp {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
+        let uri_str = params.text_document.uri.to_string();
+        let uri = params.text_document.uri.clone();
         let content = params.text_document.text.clone();
 
         self.text_sync_manager.did_open(params);
-        self.documents.insert(uri, content);
+        self.documents.insert(uri_str.clone(), content.clone());
+
+        // Compute and publish initial diagnostics
+        let lang = detect_language(uri.path());
+        let lang_lowercase = lang.to_lowercase();
+
+        if let Ok(mut parser) = TreeSitterParser::new() {
+            if parser.set_language(&lang_lowercase).is_ok() {
+                if let Ok(tree) = parser.parse(&content, uri.as_str()) {
+                    let claude_client = self.claude_client.as_deref();
+                    match diagnostics::compute_diagnostics(&tree, &content, &lang_lowercase, claude_client).await {
+                        Ok(diags) => {
+                            self.client.publish_diagnostics(uri, diags, None).await;
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to compute initial diagnostics: {}", e);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri.to_string();
+        let uri_str = params.text_document.uri.to_string();
+        let uri = params.text_document.uri.clone();
 
         if let Err(e) = self.text_sync_manager.did_change(params) {
             tracing::error!("Failed to apply incremental changes: {}", e);
         }
 
-        if let Some(content) = self.text_sync_manager.get_content(&uri) {
-            self.documents.insert(uri, content);
+        if let Some(content) = self.text_sync_manager.get_content(&uri_str) {
+            self.documents.insert(uri_str.clone(), content.clone());
+
+            // Compute and publish diagnostics in real-time
+            let lang = detect_language(uri.path());
+            let lang_lowercase = lang.to_lowercase();
+
+            // Parse with tree-sitter
+            if let Ok(mut parser) = TreeSitterParser::new() {
+                if parser.set_language(&lang_lowercase).is_ok() {
+                    if let Ok(tree) = parser.parse(&content, uri.as_str()) {
+                        // Compute diagnostics
+                        let claude_client = self.claude_client.as_deref();
+                        match diagnostics::compute_diagnostics(&tree, &content, &lang_lowercase, claude_client).await {
+                            Ok(diags) => {
+                                // Publish diagnostics to client
+                                self.client.publish_diagnostics(uri, diags, None).await;
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to compute diagnostics: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
