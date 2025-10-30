@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 mod ai;
 mod code_actions;
+mod code_lens;
 mod config;
 mod diagnostics;
 mod formatting;
@@ -30,6 +31,7 @@ mod coordinator;
 
 use ai::{ClaudeClient, ClaudeConfig, CopilotClient, CopilotConfig, CompletionContext};
 use code_actions::CodeActionProvider;
+use code_lens::CodeLensProvider;
 use config::{Config, CommandMode};
 use coordinator::CoordinatorClient;
 use diagnostics::DiagnosticProvider;
@@ -61,6 +63,7 @@ struct UniversalLsp {
     semantic_tokens_provider: Arc<SemanticTokensProvider>,
     signature_help_provider: Arc<SignatureHelpProvider>,
     inlay_hints_provider: Arc<InlayHintsProvider>,
+    code_lens_provider: Arc<CodeLensProvider>,
     workspace_manager: Arc<WorkspaceManager>,
     text_sync_manager: Arc<TextSyncManager>,
 }
@@ -157,6 +160,7 @@ impl UniversalLsp {
             semantic_tokens_provider: Arc::new(SemanticTokensProvider::new()),
             signature_help_provider: Arc::new(SignatureHelpProvider::new()),
             inlay_hints_provider: Arc::new(InlayHintsProvider::new()),
+            code_lens_provider: Arc::new(CodeLensProvider::new()),
             workspace_manager: Arc::new(WorkspaceManager::new()),
             text_sync_manager: Arc::new(TextSyncManager::new()),
         }
@@ -217,6 +221,9 @@ impl LanguageServer for UniversalLsp {
                         resolve_provider: Some(false),
                     }
                 ))),
+                code_lens_provider: Some(CodeLensOptions {
+                    resolve_provider: Some(false),
+                }),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -979,6 +986,20 @@ impl LanguageServer for UniversalLsp {
         if let Some(content) = self.documents.get(uri.as_str()) {
             match self.inlay_hints_provider.get_inlay_hints(&content, range, lang) {
                 Ok(hints) => Ok(Some(hints)),
+                Err(_) => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        let uri = &params.text_document.uri;
+        let lang = detect_language(uri.path());
+
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            match self.code_lens_provider.get_code_lenses(&content, lang) {
+                Ok(lenses) => Ok(Some(lenses)),
                 Err(_) => Ok(None),
             }
         } else {

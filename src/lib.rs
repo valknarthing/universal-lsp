@@ -322,6 +322,7 @@
 pub mod acp;
 pub mod ai;
 pub mod code_actions;
+pub mod code_lens;
 pub mod config;
 pub mod coordinator;
 pub mod diagnostics;
