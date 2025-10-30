@@ -215,12 +215,7 @@ impl LanguageServer for UniversalLsp {
                         }
                     )
                 ),
-                inlay_hint_provider: Some(OneOf::Left(InlayHintServerCapabilities::Options(
-                    InlayHintOptions {
-                        work_done_progress_options: WorkDoneProgressOptions::default(),
-                        resolve_provider: Some(false),
-                    }
-                ))),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 code_lens_provider: Some(CodeLensOptions {
                     resolve_provider: Some(false),
                 }),
