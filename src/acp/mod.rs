@@ -16,7 +16,7 @@ use serde_json::json;
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{error, info, warn};
 
 use crate::ai::claude::{ClaudeClient, ClaudeConfig};
@@ -50,6 +50,8 @@ pub struct UniversalAgent {
     tools: Arc<ToolRegistry>,
     /// Context provider for workspace awareness
     context: Arc<ContextProvider>,
+    /// Cancellation tokens per session (session_id -> watch::Receiver<bool>)
+    cancellation_tokens: Arc<DashMap<String, watch::Sender<bool>>>,
 }
 
 /// Conversation message for history tracking
@@ -137,6 +139,7 @@ impl UniversalAgent {
             workspace_root,
             tools,
             context,
+            cancellation_tokens: Arc::new(DashMap::new()),
         }
     }
 
@@ -189,6 +192,7 @@ impl UniversalAgent {
             workspace_root,
             tools,
             context,
+            cancellation_tokens: Arc::new(DashMap::new()),
         }
     }
 
@@ -388,6 +392,175 @@ impl UniversalAgent {
         Ok(accumulated_text.join("\n\n"))
     }
 
+    /// Call Claude with tools using streaming for real-time updates
+    ///
+    /// This method is similar to call_claude_with_tools but streams responses
+    /// incrementally via session notifications, providing a better UX.
+    async fn call_claude_with_tools_streaming(
+        &self,
+        client: &crate::ai::claude::ClaudeClient,
+        mut messages: Vec<crate::ai::claude::Message>,
+        tool_definitions: Vec<serde_json::Value>,
+        system_prompt: String,
+        session_id: acp::SessionId,
+    ) -> Result<String, anyhow::Error> {
+        use crate::ai::claude::{StreamEvent, ContentDelta};
+        use serde_json::json;
+
+        const MAX_ITERATIONS: usize = 10;
+        let mut iteration = 0;
+        let mut accumulated_text = Vec::new();
+
+        // Create cancellation token for this session
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+        let session_id_str = session_id.0.to_string();
+        self.cancellation_tokens.insert(session_id_str.clone(), cancel_tx);
+
+        loop {
+            // Check for cancellation
+            if *cancel_rx.borrow() {
+                info!("Streaming cancelled for session {}", session_id_str);
+                self.cancellation_tokens.remove(&session_id_str);
+                return Err(anyhow::anyhow!("Request cancelled by user"));
+            }
+
+            iteration += 1;
+            if iteration > MAX_ITERATIONS {
+                warn!("Tool execution loop exceeded maximum iterations ({})", MAX_ITERATIONS);
+                break;
+            }
+
+            // Create callback for streaming events
+            let session_update_tx = self.session_update_tx.clone();
+            let session_id_clone = session_id.clone();
+
+            let callback = move |event: StreamEvent| -> Result<(), anyhow::Error> {
+                match event {
+                    StreamEvent::ContentBlockDelta { delta, .. } => {
+                        if let ContentDelta::TextDelta { text } = delta {
+                            // Send incremental text as notification
+                            let (tx, _rx) = oneshot::channel();
+                            let _ = session_update_tx.send((
+                                acp::SessionNotification {
+                                    session_id: session_id_clone.clone(),
+                                    update: acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk {
+                                        content: text.into(),
+                                        meta: None,
+                                    }),
+                                    meta: None,
+                                },
+                                tx,
+                            ));
+                            // Don't await rx - fire and forget for streaming
+                        }
+                    }
+                    StreamEvent::MessageStart { .. } => {
+                        info!("Streaming started for session {}", session_id_clone);
+                    }
+                    StreamEvent::MessageStop => {
+                        info!("Streaming complete for session {}", session_id_clone);
+                    }
+                    _ => {}
+                }
+                Ok(())
+            };
+
+            // Call Claude with streaming
+            let response = client
+                .send_message_with_tools_streaming(
+                    &messages,
+                    Some(tool_definitions.clone()),
+                    Some(system_prompt.clone()),
+                    callback,
+                )
+                .await?;
+
+            // Collect text blocks
+            if !response.text_blocks.is_empty() {
+                accumulated_text.extend(response.text_blocks.clone());
+            }
+
+            // Check if Claude wants to use tools
+            if response.tool_uses.is_empty() {
+                info!("Streaming response complete after {} iterations", iteration);
+                break;
+            }
+
+            info!("Claude requested {} tool(s) in streaming mode", response.tool_uses.len());
+
+            // Send notification about tool execution
+            let (tx, _rx) = oneshot::channel();
+            let tool_names: Vec<_> = response.tool_uses.iter().map(|t| t.name.as_str()).collect();
+            let _ = self.session_update_tx.send((
+                acp::SessionNotification {
+                    session_id: session_id.clone(),
+                    update: acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk {
+                        content: format!("\n\n[Executing tools: {}]\n", tool_names.join(", ")).into(),
+                        meta: None,
+                    }),
+                    meta: None,
+                },
+                tx,
+            ));
+
+            // Execute tools and collect results
+            let mut tool_results = Vec::new();
+            for tool_use in &response.tool_uses {
+                info!("Executing tool: {} (id: {})", tool_use.name, tool_use.id);
+
+                let result = match self.tools.execute_tool(&tool_use.name, tool_use.input.clone()).await {
+                    Ok(result) => {
+                        info!("Tool {} succeeded", tool_use.name);
+                        json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use.id,
+                            "content": result.to_string()
+                        })
+                    }
+                    Err(e) => {
+                        error!("Tool {} failed: {}", tool_use.name, e);
+                        json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use.id,
+                            "is_error": true,
+                            "content": format!("Error executing tool: {}", e)
+                        })
+                    }
+                };
+                tool_results.push(result);
+            }
+
+            // Add assistant's response with tool uses to messages
+            let assistant_content = if !response.text_blocks.is_empty() {
+                response.text_blocks.join("\n")
+            } else {
+                format!("[Using {} tools]", response.tool_uses.len())
+            };
+
+            messages.push(crate::ai::claude::Message {
+                role: "assistant".to_string(),
+                content: assistant_content,
+            });
+
+            // Add tool results as user message for next iteration
+            let tool_results_content = tool_results
+                .iter()
+                .map(|r| serde_json::to_string_pretty(r).unwrap_or_else(|_| r.to_string()))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+
+            messages.push(crate::ai::claude::Message {
+                role: "user".to_string(),
+                content: format!("Tool results:\n{}", tool_results_content),
+            });
+        }
+
+        // Clean up cancellation token
+        self.cancellation_tokens.remove(&session_id_str);
+
+        Ok(accumulated_text.join("\n\n"))
+    }
+
     /// Generate response text based on MCP integration status (deprecated)
     #[deprecated(note = "Use prompt() method with real Claude integration instead")]
     fn generate_response(&self, prompt_summary: &str) -> String {
@@ -541,12 +714,18 @@ impl acp::Agent for UniversalAgent {
             let tool_definitions = self.tools.get_tool_definitions();
             let system_prompt = self.build_system_prompt().await;
 
-            // Call Claude API with tools
-            info!("Calling Claude API ({} messages, {} tools)", history.len(), tool_definitions.len());
+            // Call Claude API with streaming for real-time updates
+            info!("Calling Claude API with streaming ({} messages, {} tools)", history.len(), tool_definitions.len());
 
-            match self.call_claude_with_tools(client, messages, tool_definitions, system_prompt).await {
+            match self.call_claude_with_tools_streaming(
+                client,
+                messages,
+                tool_definitions,
+                system_prompt,
+                arguments.session_id.clone()
+            ).await {
                 Ok(response) => {
-                    info!("Claude API response received ({} chars)", response.len());
+                    info!("Claude streaming response complete ({} chars)", response.len());
                     response
                 }
                 Err(e) => {
@@ -610,8 +789,17 @@ impl acp::Agent for UniversalAgent {
 
     /// Handle cancellation requests
     async fn cancel(&self, args: acp::CancelNotification) -> Result<(), acp::Error> {
-        info!("ACP agent cancel request: {:?}", args);
-        // TODO: Implement cancellation logic for in-progress operations
+        let session_id_str = args.session_id.0.to_string();
+        info!("ACP agent cancel request for session: {}", session_id_str);
+
+        // Send cancellation signal if session has an active request
+        if let Some(cancel_tx) = self.cancellation_tokens.get(&session_id_str) {
+            let _ = cancel_tx.send(true);
+            info!("Cancellation signal sent for session {}", session_id_str);
+        } else {
+            info!("No active request found for session {}", session_id_str);
+        }
+
         Ok(())
     }
 
