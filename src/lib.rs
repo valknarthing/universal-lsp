@@ -338,6 +338,7 @@ pub mod signature_help;
 pub mod text_sync;
 pub mod tree_sitter;
 pub mod workspace;
+pub mod workspace_index;
 
 // Re-export commonly used types for convenience
 pub use ai::claude::{ClaudeClient, ClaudeConfig, CompletionContext};

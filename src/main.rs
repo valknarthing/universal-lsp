@@ -67,6 +67,7 @@ struct UniversalLsp {
     workspace_manager: Arc<WorkspaceManager>,
     text_sync_manager: Arc<TextSyncManager>,
     inline_completion_manager: Arc<universal_lsp::inline_completion::InlineCompletionManager>,
+    workspace_index: Arc<universal_lsp::workspace_index::WorkspaceIndex>,
 }
 
 impl UniversalLsp {
@@ -165,6 +166,7 @@ impl UniversalLsp {
             workspace_manager: Arc::new(WorkspaceManager::new()),
             text_sync_manager: Arc::new(TextSyncManager::new()),
             inline_completion_manager: Arc::new(universal_lsp::inline_completion::InlineCompletionManager::new()),
+            workspace_index: Arc::new(universal_lsp::workspace_index::WorkspaceIndex::new()),
         }
     }
 }
@@ -175,9 +177,23 @@ impl LanguageServer for UniversalLsp {
         // Initialize workspace folders if provided
         if let Some(folders) = params.workspace_folders {
             for folder in folders {
-                if let Err(e) = self.workspace_manager.add_folder(folder) {
+                // Store in workspace manager
+                if let Err(e) = self.workspace_manager.add_folder(folder.clone()) {
                     tracing::warn!("Failed to add workspace folder: {}", e);
                 }
+
+                // Set workspace root in index (use first folder)
+                if let Ok(path) = folder.uri.to_file_path() {
+                    let mut index = Arc::as_ref(&self.workspace_index).clone();
+                    index.set_workspace_root(path);
+                    break;
+                }
+            }
+        } else if let Some(root_uri) = params.root_uri {
+            // Fallback to root_uri if no workspace_folders
+            if let Ok(path) = root_uri.to_file_path() {
+                let mut index = Arc::as_ref(&self.workspace_index).clone();
+                index.set_workspace_root(path);
             }
         }
 
@@ -250,6 +266,34 @@ impl LanguageServer for UniversalLsp {
         self.client
             .log_message(MessageType::INFO, "Universal LSP initialized!")
             .await;
+
+        // Trigger workspace indexing in the background
+        let workspace_index = self.workspace_index.clone();
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            client
+                .log_message(MessageType::INFO, "Starting workspace indexing...")
+                .await;
+
+            match workspace_index.index_workspace().await {
+                Ok(count) => {
+                    client
+                        .log_message(
+                            MessageType::INFO,
+                            format!("Workspace indexing complete: {} symbols indexed", count),
+                        )
+                        .await;
+                }
+                Err(e) => {
+                    client
+                        .log_message(
+                            MessageType::WARNING,
+                            format!("Workspace indexing failed: {}", e),
+                        )
+                        .await;
+                }
+            }
+        });
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -1002,6 +1046,35 @@ impl LanguageServer for UniversalLsp {
                 format!("Workspace folders updated. Total: {}", self.workspace_manager.count()),
             )
             .await;
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        // Search workspace index for symbols
+        let query = &params.query;
+
+        let symbols = self.workspace_index.search_symbols(query);
+
+        if symbols.is_empty() {
+            return Ok(None);
+        }
+
+        // Convert to LSP SymbolInformation
+        let symbol_infos: Vec<SymbolInformation> = symbols
+            .iter()
+            .map(|s| SymbolInformation {
+                name: s.name.clone(),
+                kind: s.kind,
+                tags: None,
+                deprecated: None,
+                location: s.location.clone(),
+                container_name: s.container.clone(),
+            })
+            .collect();
+
+        Ok(Some(symbol_infos))
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
