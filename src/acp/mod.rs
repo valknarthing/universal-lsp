@@ -14,10 +14,14 @@ use agent_client_protocol::Client; // Required for session_notification method
 use anyhow::Result;
 use serde_json::json;
 use std::cell::Cell;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, warn};
 
+use crate::ai::claude::{ClaudeClient, ClaudeConfig};
 use crate::coordinator::CoordinatorClient;
+use dashmap::DashMap;
 
 /// Universal LSP ACP Agent
 ///
@@ -30,23 +34,104 @@ pub struct UniversalAgent {
     next_session_id: Cell<u64>,
     /// MCP coordinator client for enhanced capabilities
     coordinator_client: Option<CoordinatorClient>,
+    /// Claude API client for AI-powered responses
+    claude_client: Option<Arc<ClaudeClient>>,
+    /// Conversation history per session (session_id -> messages)
+    sessions: Arc<DashMap<String, Vec<ConversationMessage>>>,
+    /// Workspace root directory
+    workspace_root: PathBuf,
 }
+
+/// Conversation message for history tracking
+#[derive(Debug, Clone)]
+struct ConversationMessage {
+    role: String,  // "user" or "assistant"
+    content: String,
+    timestamp: std::time::SystemTime,
+}
+
+/// System prompt for the Claude-powered development assistant
+const SYSTEM_PROMPT: &str = r#"You are an expert software development assistant integrated into Universal LSP.
+
+## Your Capabilities
+You are fluent in 19+ programming languages including:
+- Systems: Rust, C, C++, Go
+- Web: JavaScript, TypeScript, HTML, CSS, Svelte
+- Application: Python, Ruby, Java, PHP, Scala, Kotlin, C#
+- Scripting: Bash, Shell
+
+You excel at:
+1. Code generation with best practices
+2. Bug fixing and debugging assistance
+3. Code refactoring and optimization
+4. Writing comprehensive tests
+5. Documentation and explanations
+6. Architecture and design patterns
+
+## Available Tools
+You have access to file operations and workspace inspection tools. When you need to read files, search code, or understand the workspace structure, you can use these tools.
+
+## Guidelines
+- Be concise and actionable
+- Provide code in markdown blocks with language tags
+- Reference specific files and line numbers when relevant
+- Ask clarifying questions when requirements are unclear
+- Follow language-specific best practices
+- Suggest tests for new code
+- Explain complex concepts clearly
+
+## Response Format
+Use markdown for formatting:
+- `code` for inline code
+- ```language for code blocks
+- **bold** for emphasis
+- Lists for step-by-step instructions
+
+Let's write great code together!"#;
 
 impl UniversalAgent {
     /// Create a new Universal ACP Agent
     pub fn new(
         session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
     ) -> Self {
+        Self::new_with_workspace(session_update_tx, PathBuf::from("."))
+    }
+
+    /// Create a new Universal ACP Agent with specified workspace
+    pub fn new_with_workspace(
+        session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
+        workspace_root: PathBuf,
+    ) -> Self {
+        // Initialize Claude client if API key is available
+        let claude_client = Self::init_claude_client();
+
+        info!(
+            "UniversalAgent created (Claude: {}, workspace: {})",
+            if claude_client.is_some() { "enabled" } else { "disabled" },
+            workspace_root.display()
+        );
+
         Self {
             session_update_tx,
             next_session_id: Cell::new(1),
             coordinator_client: None,
+            claude_client,
+            sessions: Arc::new(DashMap::new()),
+            workspace_root,
         }
     }
 
     /// Create a new Universal ACP Agent with MCP coordinator integration
     pub async fn with_coordinator(
         session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
+    ) -> Self {
+        Self::with_coordinator_and_workspace(session_update_tx, PathBuf::from(".")).await
+    }
+
+    /// Create a new Universal ACP Agent with MCP coordinator integration and workspace
+    pub async fn with_coordinator_and_workspace(
+        session_update_tx: mpsc::UnboundedSender<(acp::SessionNotification, oneshot::Sender<()>)>,
+        workspace_root: PathBuf,
     ) -> Self {
         let coordinator_client = match CoordinatorClient::connect().await {
             Ok(client) => {
@@ -60,14 +145,130 @@ impl UniversalAgent {
             }
         };
 
+        let claude_client = Self::init_claude_client();
+
+        info!(
+            "UniversalAgent created (Claude: {}, MCP: {}, workspace: {})",
+            if claude_client.is_some() { "enabled" } else { "disabled" },
+            if coordinator_client.is_some() { "enabled" } else { "disabled" },
+            workspace_root.display()
+        );
+
         Self {
             session_update_tx,
             next_session_id: Cell::new(1),
             coordinator_client,
+            claude_client,
+            sessions: Arc::new(DashMap::new()),
+            workspace_root,
         }
     }
 
-    /// Generate response text based on MCP integration status
+    /// Initialize Claude API client from environment variable
+    fn init_claude_client() -> Option<Arc<ClaudeClient>> {
+        match std::env::var("ANTHROPIC_API_KEY") {
+            Ok(api_key) if !api_key.is_empty() => {
+                let config = ClaudeConfig {
+                    api_key,
+                    model: "claude-sonnet-4-20250514".to_string(),
+                    max_tokens: 4096,
+                    temperature: 0.7,  // Higher for more creative responses
+                    timeout_ms: 30000,  // 30s timeout for longer responses
+                };
+
+                match ClaudeClient::new(config) {
+                    Ok(client) => {
+                        info!("Claude API client initialized successfully");
+                        Some(Arc::new(client))
+                    }
+                    Err(e) => {
+                        error!("Failed to initialize Claude client: {}", e);
+                        None
+                    }
+                }
+            }
+            Ok(_) => {
+                warn!("ANTHROPIC_API_KEY is empty");
+                None
+            }
+            Err(_) => {
+                warn!("ANTHROPIC_API_KEY not set - Claude integration disabled");
+                info!("Set ANTHROPIC_API_KEY environment variable to enable Claude");
+                None
+            }
+        }
+    }
+
+    /// Build enhanced system prompt with context
+    fn build_system_prompt(&self) -> String {
+        let mut prompt = SYSTEM_PROMPT.to_string();
+
+        // Add workspace context
+        prompt.push_str(&format!(
+            "\n\n## Current Workspace\nRoot: {}\n",
+            self.workspace_root.display()
+        ));
+
+        // Add MCP status
+        if let Some(_coordinator) = &self.coordinator_client {
+            prompt.push_str("\nMCP Integration: ✅ Active (enhanced capabilities available)\n");
+        } else {
+            prompt.push_str("\nMCP Integration: ⚠️ Not available\n");
+        }
+
+        prompt
+    }
+
+    /// Extract text content from ACP prompt
+    fn extract_message_from_prompt(
+        &self,
+        prompt: &[acp::ContentBlock],
+    ) -> Result<String, acp::Error> {
+        let mut messages = Vec::new();
+
+        for content in prompt {
+            // Convert ContentBlock to string representation
+            // ContentBlock is an enum with Text, Resource, ResourceLink variants
+            let text = format!("{:?}", content); // Use Debug formatting for now
+
+            // Try to extract actual text if it's a Text variant
+            // This is a simplified version - proper implementation would match on variants
+            if !text.is_empty() {
+                messages.push(text);
+            }
+        }
+
+        if messages.is_empty() {
+            return Err(acp::Error::invalid_request());
+        }
+
+        Ok(messages.join("\n"))
+    }
+
+    /// Generate fallback response when Claude is not available
+    fn generate_fallback_response(&self, user_message: &str) -> String {
+        format!(
+            "I'm the Universal LSP ACP Agent, but Claude API integration is not available.\n\n\
+             Your message: {}\n\n\
+             I support 19+ programming languages and would normally provide:\n\
+             • Code completions and suggestions\n\
+             • Code explanations and documentation\n\
+             • Refactoring suggestions\n\
+             • Debugging assistance\n\
+             • Best practices and patterns\n\n\
+             To enable Claude AI responses:\n\
+             1. Set ANTHROPIC_API_KEY environment variable\n\
+             2. Restart the ACP agent\n\n\
+             MCP Integration: {}\n\
+             Workspace: {}",
+            user_message,
+            if let Some(_coordinator) = &self.coordinator_client { "✅ Active" } else { "⚠️ Not available" },
+            self.workspace_root.display()
+        )
+    }
+
+    /// Generate response text based on MCP integration status (deprecated)
+    #[deprecated(note = "Use prompt() method with real Claude integration instead")]
     fn generate_response(&self, prompt_summary: &str) -> String {
         if let Some(coordinator) = &self.coordinator_client {
             format!(
@@ -167,19 +368,95 @@ impl acp::Agent for UniversalAgent {
         &self,
         arguments: acp::PromptRequest,
     ) -> Result<acp::PromptResponse, acp::Error> {
+        let session_id_str = arguments.session_id.0.to_string();
+        let session_id = session_id_str.as_str();
+
         info!(
-            "ACP agent prompt for session {}: {} content items",
-            arguments.session_id.0,
+            "Processing prompt for session {}: {} content items",
+            session_id,
             arguments.prompt.len()
         );
 
-        // Create a simple prompt summary from the first few items
-        let prompt_summary = format!("Received {} items", arguments.prompt.len());
+        // 1. Extract user message from ACP prompt content
+        let user_message = self.extract_message_from_prompt(&arguments.prompt)?;
 
-        // Generate response text
-        let response_text = self.generate_response(&prompt_summary);
+        if user_message.is_empty() {
+            return Err(acp::Error::invalid_request());
+        }
 
-        // Send response as a notification
+        info!("User message ({} chars): {}", user_message.len(),
+            if user_message.len() > 100 {
+                format!("{}...", &user_message[..100])
+            } else {
+                user_message.clone()
+            }
+        );
+
+        // 2. Get or create conversation history for this session
+        let mut history = self.sessions
+            .entry(session_id_str.clone())
+            .or_insert_with(Vec::new);
+
+        // 3. Generate response (Claude or fallback)
+        let response_text = if let Some(client) = &self.claude_client {
+            // Build messages for Claude API
+            let mut messages = Vec::new();
+
+            // Add conversation history
+            for msg in history.iter() {
+                messages.push(crate::ai::claude::Message {
+                    role: msg.role.clone(),
+                    content: msg.content.clone(),
+                });
+            }
+
+            // Add current user message
+            messages.push(crate::ai::claude::Message {
+                role: "user".to_string(),
+                content: user_message.clone(),
+            });
+
+            // Call Claude API
+            info!("Calling Claude API ({} messages in history)", history.len());
+            match client.send_message(&messages).await {
+                Ok(response) => {
+                    info!("Claude API response received ({} chars)", response.len());
+                    response
+                }
+                Err(e) => {
+                    error!("Claude API error: {}", e);
+                    format!(
+                        "I encountered an error communicating with Claude API: {}\n\n\
+                         Please check:\n\
+                         - Your API key is valid\n\
+                         - You have available credits\n\
+                         - Network connectivity is working\n\n\
+                         Error details: {}",
+                        e,
+                        e
+                    )
+                }
+            }
+        } else {
+            // Fallback when Claude is not available
+            warn!("Claude client not available, using fallback response");
+            self.generate_fallback_response(&user_message)
+        };
+
+        // 4. Store in conversation history
+        history.push(ConversationMessage {
+            role: "user".to_string(),
+            content: user_message,
+            timestamp: std::time::SystemTime::now(),
+        });
+
+        history.push(ConversationMessage {
+            role: "assistant".to_string(),
+            content: response_text.clone(),
+            timestamp: std::time::SystemTime::now(),
+        });
+
+        // 5. Send response as notification
         let (tx, rx) = oneshot::channel();
         self.session_update_tx
             .send((
@@ -194,7 +471,10 @@ impl acp::Agent for UniversalAgent {
                 tx,
             ))
             .map_err(|_| acp::Error::internal_error())?;
+
         rx.await.map_err(|_| acp::Error::internal_error())?;
+
+        info!("Prompt processing complete for session {}", session_id);
 
         Ok(acp::PromptResponse {
             stop_reason: acp::StopReason::EndTurn,
@@ -292,9 +572,17 @@ impl acp::Agent for UniversalAgent {
 
 /// Run the ACP agent server on stdio
 pub async fn run_agent() -> Result<()> {
+    run_agent_with_workspace(PathBuf::from(".")).await
+}
+
+/// Run the ACP agent server on stdio with specified workspace
+pub async fn run_agent_with_workspace(workspace_root: PathBuf) -> Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-    info!("Starting Universal LSP ACP Agent with MCP integration");
+    info!(
+        "Starting Universal LSP ACP Agent (workspace: {})",
+        workspace_root.display()
+    );
 
     let outgoing = tokio::io::stdout().compat_write();
     let incoming = tokio::io::stdin().compat();
@@ -306,13 +594,18 @@ pub async fn run_agent() -> Result<()> {
         .run_until(async move {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-            // Create agent with MCP coordinator integration
-            let agent = UniversalAgent::with_coordinator(tx).await;
+            // Create agent with MCP coordinator integration and workspace
+            let agent = UniversalAgent::with_coordinator_and_workspace(tx, workspace_root.clone())
+                .await;
+
             let has_mcp = agent.coordinator_client.is_some();
+            let has_claude = agent.claude_client.is_some();
 
             info!(
-                "ACP agent initialized (MCP integration: {})",
-                if has_mcp { "enabled" } else { "disabled" }
+                "ACP agent initialized (Claude: {}, MCP: {}, workspace: {})",
+                if has_claude { "✅" } else { "❌" },
+                if has_mcp { "✅" } else { "❌" },
+                workspace_root.display()
             );
 
             let (conn, handle_io) =

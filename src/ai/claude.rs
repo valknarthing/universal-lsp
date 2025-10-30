@@ -45,10 +45,10 @@ struct ClaudeRequest {
     messages: Vec<Message>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Message {
-    role: String,
-    content: String,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
 }
 
 /// Claude Messages API response structure
@@ -126,6 +126,50 @@ impl ClaudeClient {
             .context("Failed to build HTTP client")?;
 
         Ok(Self { config, http_client })
+    }
+
+    /// Send a multi-turn conversation to Claude and get response
+    pub async fn send_message(&self, messages: &[Message]) -> Result<String> {
+        let request = ClaudeRequest {
+            model: self.config.model.clone(),
+            max_tokens: self.config.max_tokens,
+            temperature: self.config.temperature,
+            messages: messages.to_vec(),
+        };
+
+        let response = self
+            .http_client
+            .post("https://api.anthropic.com/v1/messages")
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send request to Claude API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_body = response.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "Claude API returned error status {}: {}",
+                status,
+                error_body
+            ));
+        }
+
+        let claude_response: ClaudeResponse = response
+            .json()
+            .await
+            .context("Failed to parse Claude API response")?;
+
+        // Extract text from content blocks
+        let text = claude_response
+            .content
+            .iter()
+            .filter(|block| block.content_type == "text")
+            .map(|block| block.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        Ok(text)
     }
 
     /// Get code completions from Claude
