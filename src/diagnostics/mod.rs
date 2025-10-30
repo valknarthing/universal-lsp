@@ -373,6 +373,7 @@ fn byte_to_position(source: &str, byte_offset: usize) -> Position {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree_sitter::TreeSitterParser;
 
     #[test]
     fn test_byte_to_position() {
@@ -388,5 +389,106 @@ mod tests {
         assert!(is_python_builtin("len"));
         assert!(is_python_builtin("True"));
         assert!(!is_python_builtin("my_function"));
+    }
+
+    #[tokio::test]
+    async fn test_syntax_error_detection() {
+        let source = r#"
+def broken_function():
+    print("missing closing paren"
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("python").unwrap();
+        let tree = parser.parse(source, "test.py").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "python", None).await.unwrap();
+
+        // Should detect syntax error
+        assert!(!diagnostics.is_empty(), "Should detect syntax error for unclosed parenthesis");
+        assert!(diagnostics.iter().any(|d| d.severity == Some(DiagnosticSeverity::ERROR)));
+    }
+
+    #[tokio::test]
+    async fn test_undefined_variable_detection() {
+        let source = r#"
+def test_function():
+    result = undefined_variable + 10
+    return result
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("python").unwrap();
+        let tree = parser.parse(source, "test.py").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "python", None).await.unwrap();
+
+        // Should detect undefined variable
+        assert!(diagnostics.iter().any(|d| {
+            d.message.contains("undefined_variable") &&
+            d.severity == Some(DiagnosticSeverity::WARNING)
+        }), "Should detect undefined variable");
+    }
+
+    #[tokio::test]
+    async fn test_no_false_positives_for_builtins() {
+        let source = r#"
+def test_builtins():
+    print(len([1, 2, 3]))
+    result = str(123)
+    return result
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("python").unwrap();
+        let tree = parser.parse(source, "test.py").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "python", None).await.unwrap();
+
+        // Should NOT report print, len, or str as undefined
+        assert!(!diagnostics.iter().any(|d| d.message.contains("print")));
+        assert!(!diagnostics.iter().any(|d| d.message.contains("len")));
+        assert!(!diagnostics.iter().any(|d| d.message.contains("str")));
+    }
+
+    #[tokio::test]
+    async fn test_defined_variables_no_warning() {
+        let source = r#"
+def calculate_sum(a, b):
+    result = a + b
+    return result
+
+x = calculate_sum(5, 3)
+print(x)
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("python").unwrap();
+        let tree = parser.parse(source, "test.py").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "python", None).await.unwrap();
+
+        // Should NOT report any undefined variables
+        assert!(!diagnostics.iter().any(|d| d.message.contains("Undefined name")));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_errors() {
+        let source = r#"
+def test():
+    x = undefined_var1
+    y = undefined_var2
+    return x + y
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("python").unwrap();
+        let tree = parser.parse(source, "test.py").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "python", None).await.unwrap();
+
+        // Should detect both undefined variables
+        assert!(diagnostics.iter().any(|d| d.message.contains("undefined_var1")));
+        assert!(diagnostics.iter().any(|d| d.message.contains("undefined_var2")));
     }
 }
