@@ -337,15 +337,391 @@ fn is_python_builtin(name: &str) -> bool {
 }
 
 /// Analyze JavaScript/TypeScript semantic errors
-fn analyze_js_semantics(_tree: &Tree, _source: &str) -> Result<Vec<Diagnostic>> {
-    // TODO: Implement JS-specific semantic analysis
-    Ok(Vec::new())
+fn analyze_js_semantics(tree: &Tree, source: &str) -> Result<Vec<Diagnostic>> {
+    let mut diagnostics = Vec::new();
+
+    // Find undefined variables (simple heuristic: used but never defined)
+    let mut defined_names = std::collections::HashSet::new();
+    let mut used_names = Vec::new();
+
+    let mut cursor = tree.root_node().walk();
+    collect_js_names(&mut cursor, source, &mut defined_names, &mut used_names);
+
+    // Check for undefined names
+    for (name, pos) in used_names {
+        if !defined_names.contains(&name) && !is_js_builtin(&name) {
+            diagnostics.push(Diagnostic {
+                range: Range {
+                    start: pos,
+                    end: Position {
+                        line: pos.line,
+                        character: pos.character + name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: None,
+                code_description: None,
+                source: Some("universal-lsp".to_string()),
+                message: format!("Undefined name '{}'", name),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+    }
+
+    Ok(diagnostics)
+}
+
+/// Collect JavaScript/TypeScript variable definitions and usages
+fn collect_js_names(
+    cursor: &mut tree_sitter::TreeCursor,
+    source: &str,
+    defined: &mut std::collections::HashSet<String>,
+    used: &mut Vec<(String, Position)>,
+) {
+    let node = cursor.node();
+
+    match node.kind() {
+        // Definition sites
+        "function_declaration" | "function" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                    defined.insert(name.to_string());
+                }
+            }
+        }
+        "class_declaration" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                    defined.insert(name.to_string());
+                }
+            }
+        }
+        "variable_declarator" => {
+            // const/let/var declarations
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if name_node.kind() == "identifier" {
+                    if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                        defined.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        "formal_parameters" => {
+            // function parameters are definitions
+            let mut param_cursor = node.walk();
+            for child in node.children(&mut param_cursor) {
+                if child.kind() == "identifier" || child.kind() == "required_parameter" {
+                    if let Ok(name) = child.utf8_text(source.as_bytes()) {
+                        defined.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        "import_specifier" => {
+            // import { foo } from 'module'
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                    defined.insert(name.to_string());
+                }
+            }
+        }
+        // Usage sites
+        "identifier" => {
+            // Check if this identifier is being used (not defined)
+            if let Some(parent) = node.parent() {
+                let is_definition = matches!(
+                    parent.kind(),
+                    "function_declaration" | "class_declaration" | "variable_declarator"
+                ) && parent.child_by_field_name("name").map(|n| n.id()) == Some(node.id());
+
+                if !is_definition {
+                    if let Ok(name) = node.utf8_text(source.as_bytes()) {
+                        let pos = byte_to_position(source, node.start_byte());
+                        used.push((name.to_string(), pos));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Recurse
+    if cursor.goto_first_child() {
+        loop {
+            collect_js_names(cursor, source, defined, used);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+}
+
+/// Check if a name is a JavaScript/TypeScript builtin
+fn is_js_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        // Global objects
+        "Object"
+            | "Array"
+            | "String"
+            | "Number"
+            | "Boolean"
+            | "Function"
+            | "Symbol"
+            | "BigInt"
+            | "Math"
+            | "Date"
+            | "RegExp"
+            | "Error"
+            | "JSON"
+            | "Promise"
+            | "Map"
+            | "Set"
+            | "WeakMap"
+            | "WeakSet"
+            // Global functions
+            | "console"
+            | "parseInt"
+            | "parseFloat"
+            | "isNaN"
+            | "isFinite"
+            | "encodeURI"
+            | "encodeURIComponent"
+            | "decodeURI"
+            | "decodeURIComponent"
+            | "eval"
+            | "setTimeout"
+            | "setInterval"
+            | "clearTimeout"
+            | "clearInterval"
+            // Common globals
+            | "window"
+            | "document"
+            | "navigator"
+            | "location"
+            | "fetch"
+            | "require"
+            | "module"
+            | "exports"
+            | "process"
+            | "global"
+            | "__dirname"
+            | "__filename"
+            // Keywords/literals
+            | "undefined"
+            | "null"
+            | "true"
+            | "false"
+            | "this"
+            | "arguments"
+            | "Infinity"
+            | "NaN"
+    )
 }
 
 /// Analyze Rust semantic errors
-fn analyze_rust_semantics(_tree: &Tree, _source: &str) -> Result<Vec<Diagnostic>> {
-    // TODO: Implement Rust-specific semantic analysis
-    Ok(Vec::new())
+fn analyze_rust_semantics(tree: &Tree, source: &str) -> Result<Vec<Diagnostic>> {
+    let mut diagnostics = Vec::new();
+
+    // Find undefined variables/items
+    let mut defined_names = std::collections::HashSet::new();
+    let mut used_names = Vec::new();
+
+    let mut cursor = tree.root_node().walk();
+    collect_rust_names(&mut cursor, source, &mut defined_names, &mut used_names);
+
+    // Check for undefined names
+    for (name, pos) in used_names {
+        if !defined_names.contains(&name) && !is_rust_builtin(&name) {
+            diagnostics.push(Diagnostic {
+                range: Range {
+                    start: pos,
+                    end: Position {
+                        line: pos.line,
+                        character: pos.character + name.len() as u32,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: None,
+                code_description: None,
+                source: Some("universal-lsp".to_string()),
+                message: format!("Undefined name '{}'", name),
+                related_information: None,
+                tags: None,
+                data: None,
+            });
+        }
+    }
+
+    Ok(diagnostics)
+}
+
+/// Collect Rust variable definitions and usages
+fn collect_rust_names(
+    cursor: &mut tree_sitter::TreeCursor,
+    source: &str,
+    defined: &mut std::collections::HashSet<String>,
+    used: &mut Vec<(String, Position)>,
+) {
+    let node = cursor.node();
+
+    match node.kind() {
+        // Definition sites
+        "function_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                    defined.insert(name.to_string());
+                }
+            }
+        }
+        "struct_item" | "enum_item" | "type_item" | "trait_item" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+                    defined.insert(name.to_string());
+                }
+            }
+        }
+        "let_declaration" => {
+            // let bindings
+            if let Some(pattern) = node.child_by_field_name("pattern") {
+                if pattern.kind() == "identifier" {
+                    if let Ok(name) = pattern.utf8_text(source.as_bytes()) {
+                        defined.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        "parameters" | "parameter" => {
+            // function parameters
+            let mut param_cursor = node.walk();
+            for child in node.children(&mut param_cursor) {
+                if child.kind() == "identifier" {
+                    if let Ok(name) = child.utf8_text(source.as_bytes()) {
+                        defined.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        "use_declaration" => {
+            // use statements import names
+            let mut use_cursor = node.walk();
+            for child in node.children(&mut use_cursor) {
+                if child.kind() == "identifier" {
+                    if let Ok(name) = child.utf8_text(source.as_bytes()) {
+                        defined.insert(name.to_string());
+                    }
+                }
+            }
+        }
+        // Usage sites
+        "identifier" => {
+            // Check if this identifier is being used (not defined)
+            if let Some(parent) = node.parent() {
+                let is_definition = matches!(
+                    parent.kind(),
+                    "function_item"
+                        | "struct_item"
+                        | "enum_item"
+                        | "type_item"
+                        | "trait_item"
+                        | "let_declaration"
+                ) && parent.child_by_field_name("name").map(|n| n.id()) == Some(node.id());
+
+                if !is_definition {
+                    if let Ok(name) = node.utf8_text(source.as_bytes()) {
+                        let pos = byte_to_position(source, node.start_byte());
+                        used.push((name.to_string(), pos));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    // Recurse
+    if cursor.goto_first_child() {
+        loop {
+            collect_rust_names(cursor, source, defined, used);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+}
+
+/// Check if a name is a Rust standard library item or keyword
+fn is_rust_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        // Primitive types
+        "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+            | "u8"
+            | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "f32"
+            | "f64"
+            | "bool"
+            | "char"
+            | "str"
+            // Common types
+            | "String"
+            | "Vec"
+            | "Option"
+            | "Some"
+            | "None"
+            | "Result"
+            | "Ok"
+            | "Err"
+            | "Box"
+            | "Rc"
+            | "Arc"
+            | "Cell"
+            | "RefCell"
+            // Traits
+            | "Clone"
+            | "Copy"
+            | "Debug"
+            | "Default"
+            | "Drop"
+            | "Send"
+            | "Sync"
+            | "Sized"
+            | "Iterator"
+            | "IntoIterator"
+            | "From"
+            | "Into"
+            // Macros (without !)
+            | "println"
+            | "print"
+            | "eprintln"
+            | "eprint"
+            | "dbg"
+            | "panic"
+            | "assert"
+            | "assert_eq"
+            | "assert_ne"
+            | "vec"
+            | "format"
+            // Keywords
+            | "self"
+            | "Self"
+            | "super"
+            | "crate"
+            | "true"
+            | "false"
+    )
 }
 
 /// Convert byte offset to LSP Position
@@ -490,5 +866,146 @@ def test():
         // Should detect both undefined variables
         assert!(diagnostics.iter().any(|d| d.message.contains("undefined_var1")));
         assert!(diagnostics.iter().any(|d| d.message.contains("undefined_var2")));
+    }
+
+    // JavaScript/TypeScript tests
+
+    #[tokio::test]
+    async fn test_js_undefined_variable() {
+        let source = r#"
+function test() {
+    const result = undefinedVar + 10;
+    return result;
+}
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("javascript").unwrap();
+        let tree = parser.parse(source, "test.js").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "javascript", None).await.unwrap();
+
+        // Should detect undefined variable
+        assert!(diagnostics.iter().any(|d| {
+            d.message.contains("undefinedVar") &&
+            d.severity == Some(DiagnosticSeverity::WARNING)
+        }), "Should detect undefined JavaScript variable");
+    }
+
+    #[tokio::test]
+    async fn test_js_no_false_positives_for_builtins() {
+        let source = r#"
+function test() {
+    console.log(Array.from([1, 2, 3]));
+    const obj = JSON.parse('{"key": "value"}');
+    return Promise.resolve(obj);
+}
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("javascript").unwrap();
+        let tree = parser.parse(source, "test.js").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "javascript", None).await.unwrap();
+
+        // Should NOT report console, Array, JSON, Promise as undefined
+        assert!(!diagnostics.iter().any(|d| d.message.contains("console")));
+        assert!(!diagnostics.iter().any(|d| d.message.contains("Array")));
+        assert!(!diagnostics.iter().any(|d| d.message.contains("JSON")));
+        assert!(!diagnostics.iter().any(|d| d.message.contains("Promise")));
+    }
+
+    #[tokio::test]
+    async fn test_js_defined_variables_no_warning() {
+        let source = r#"
+function calculateSum(a, b) {
+    const result = a + b;
+    return result;
+}
+
+const x = calculateSum(5, 3);
+console.log(x);
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("javascript").unwrap();
+        let tree = parser.parse(source, "test.js").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "javascript", None).await.unwrap();
+
+        // Should NOT report any undefined variables
+        assert!(!diagnostics.iter().any(|d| d.message.contains("Undefined name")));
+    }
+
+    // Rust tests
+
+    #[tokio::test]
+    async fn test_rust_undefined_variable() {
+        let source = r#"
+fn test() {
+    let result = undefined_var + 10;
+    result
+}
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("rust").unwrap();
+        let tree = parser.parse(source, "test.rs").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "rust", None).await.unwrap();
+
+        // Should detect undefined variable
+        assert!(diagnostics.iter().any(|d| {
+            d.message.contains("undefined_var") &&
+            d.severity == Some(DiagnosticSeverity::WARNING)
+        }), "Should detect undefined Rust variable");
+    }
+
+    #[tokio::test]
+    async fn test_rust_no_false_positives_for_builtins() {
+        let source = r#"
+fn test() {
+    println!("Hello");
+    let vec = Vec::new();
+    let opt = Some(42);
+    let result = Ok(());
+}
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("rust").unwrap();
+        let tree = parser.parse(source, "test.rs").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "rust", None).await.unwrap();
+
+        // Should NOT report println, Vec, Some, Ok as undefined
+        assert!(!diagnostics.iter().any(|d| d.message.contains("println")));
+        assert!(!diagnostics.iter().any(|d| d.message.contains("Vec")));
+        assert!(!diagnostics.iter().any(|d| d.message.contains("Some")));
+        assert!(!diagnostics.iter().any(|d| d.message.contains("Ok")));
+    }
+
+    #[tokio::test]
+    async fn test_rust_defined_variables_no_warning() {
+        let source = r#"
+fn calculate_sum(a: i32, b: i32) -> i32 {
+    let result = a + b;
+    result
+}
+
+fn main() {
+    let x = calculate_sum(5, 3);
+    println!("{}", x);
+}
+"#;
+
+        let mut parser = TreeSitterParser::new().unwrap();
+        parser.set_language("rust").unwrap();
+        let tree = parser.parse(source, "test.rs").unwrap();
+
+        let diagnostics = compute_diagnostics(&tree, source, "rust", None).await.unwrap();
+
+        // Should NOT report any undefined variables
+        assert!(!diagnostics.iter().any(|d| d.message.contains("Undefined name")));
     }
 }
