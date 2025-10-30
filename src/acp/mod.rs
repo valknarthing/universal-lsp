@@ -24,7 +24,10 @@ use crate::coordinator::CoordinatorClient;
 use dashmap::DashMap;
 
 pub mod tools;
+pub mod context;
+
 use tools::ToolRegistry;
+use context::ContextProvider;
 
 /// Universal LSP ACP Agent
 ///
@@ -45,6 +48,8 @@ pub struct UniversalAgent {
     workspace_root: PathBuf,
     /// Tool registry for Claude-executable actions
     tools: Arc<ToolRegistry>,
+    /// Context provider for workspace awareness
+    context: Arc<ContextProvider>,
 }
 
 /// Conversation message for history tracking
@@ -113,6 +118,9 @@ impl UniversalAgent {
         // Initialize tool registry with workspace
         let tools = Arc::new(ToolRegistry::new(workspace_root.clone()));
 
+        // Initialize context provider
+        let context = Arc::new(ContextProvider::new(workspace_root.clone()));
+
         info!(
             "UniversalAgent created (Claude: {}, tools: {}, workspace: {})",
             if claude_client.is_some() { "enabled" } else { "disabled" },
@@ -128,6 +136,7 @@ impl UniversalAgent {
             sessions: Arc::new(DashMap::new()),
             workspace_root,
             tools,
+            context,
         }
     }
 
@@ -160,6 +169,9 @@ impl UniversalAgent {
         // Initialize tool registry with workspace
         let tools = Arc::new(ToolRegistry::new(workspace_root.clone()));
 
+        // Initialize context provider
+        let context = Arc::new(ContextProvider::new(workspace_root.clone()));
+
         info!(
             "UniversalAgent created (Claude: {}, MCP: {}, tools: {}, workspace: {})",
             if claude_client.is_some() { "enabled" } else { "disabled" },
@@ -176,6 +188,7 @@ impl UniversalAgent {
             sessions: Arc::new(DashMap::new()),
             workspace_root,
             tools,
+            context,
         }
     }
 
@@ -215,14 +228,11 @@ impl UniversalAgent {
     }
 
     /// Build enhanced system prompt with context
-    fn build_system_prompt(&self) -> String {
+    async fn build_system_prompt(&self) -> String {
         let mut prompt = SYSTEM_PROMPT.to_string();
 
-        // Add workspace context
-        prompt.push_str(&format!(
-            "\n\n## Current Workspace\nRoot: {}\n",
-            self.workspace_root.display()
-        ));
+        // Add rich workspace context from context provider
+        prompt.push_str(&self.context.format_for_prompt().await);
 
         // Add MCP status
         if let Some(_coordinator) = &self.coordinator_client {
@@ -529,7 +539,7 @@ impl acp::Agent for UniversalAgent {
 
             // Get tool definitions
             let tool_definitions = self.tools.get_tool_definitions();
-            let system_prompt = self.build_system_prompt();
+            let system_prompt = self.build_system_prompt().await;
 
             // Call Claude API with tools
             info!("Calling Claude API ({} messages, {} tools)", history.len(), tool_definitions.len());
@@ -1073,27 +1083,27 @@ mod tests {
         std::env::remove_var("ANTHROPIC_API_KEY");
     }
 
-    #[test]
-    fn test_build_system_prompt() {
+    #[tokio::test]
+    async fn test_build_system_prompt() {
         let (tx, _rx) = mpsc::unbounded_channel();
         let workspace = PathBuf::from("/test/workspace");
         let agent = UniversalAgent::new_with_workspace(tx, workspace.clone());
 
-        let system_prompt = agent.build_system_prompt();
+        let system_prompt = agent.build_system_prompt().await;
 
         // Verify system prompt contains key information
         assert!(system_prompt.contains("expert software development assistant"));
         assert!(system_prompt.contains(&workspace.display().to_string()));
-        assert!(system_prompt.contains("Current Workspace") || system_prompt.contains("Root:"));
+        assert!(system_prompt.contains("Workspace Context") || system_prompt.contains("Root:"));
     }
 
-    #[test]
-    fn test_build_system_prompt_with_mcp() {
+    #[tokio::test]
+    async fn test_build_system_prompt_with_mcp() {
         let (tx, _rx) = mpsc::unbounded_channel();
         let workspace = PathBuf::from("/test/workspace");
         let agent = UniversalAgent::new_with_workspace(tx, workspace);
 
-        let system_prompt = agent.build_system_prompt();
+        let system_prompt = agent.build_system_prompt().await;
 
         // System prompt should include MCP status
         assert!(
@@ -1237,26 +1247,26 @@ mod tests {
         assert!(SYSTEM_PROMPT.len() > 100, "System prompt should be substantial");
     }
 
-    #[test]
-    fn test_workspace_path_handling() {
+    #[tokio::test]
+    async fn test_workspace_path_handling() {
         let (tx, _rx) = mpsc::unbounded_channel();
 
         // Test with absolute path
         let absolute = PathBuf::from("/home/user/project");
         let agent1 = UniversalAgent::new_with_workspace(tx.clone(), absolute.clone());
-        let prompt1 = agent1.build_system_prompt();
+        let prompt1 = agent1.build_system_prompt().await;
         assert!(prompt1.contains(&absolute.display().to_string()));
 
         // Test with relative path
         let relative = PathBuf::from("./project");
         let agent2 = UniversalAgent::new_with_workspace(tx.clone(), relative.clone());
-        let prompt2 = agent2.build_system_prompt();
+        let prompt2 = agent2.build_system_prompt().await;
         assert!(prompt2.contains("Workspace"));
 
         // Test with current directory
         let current = PathBuf::from(".");
         let agent3 = UniversalAgent::new_with_workspace(tx, current);
-        let prompt3 = agent3.build_system_prompt();
+        let prompt3 = agent3.build_system_prompt().await;
         assert!(prompt3.contains("Workspace"));
     }
 
