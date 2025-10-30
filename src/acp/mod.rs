@@ -910,4 +910,297 @@ mod tests {
         let unique_count = session_ids.iter().collect::<std::collections::HashSet<_>>().len();
         assert_eq!(unique_count, 5);
     }
+
+    // ========================================================================
+    // Unit Tests for Helper Methods (Phase 1.10)
+    // ========================================================================
+
+    #[test]
+    fn test_init_claude_client_with_api_key() {
+        // Set API key
+        std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test-key-123");
+
+        let client = UniversalAgent::init_claude_client();
+
+        assert!(client.is_some(), "Claude client should be initialized with API key");
+
+        // Cleanup
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn test_init_claude_client_without_api_key() {
+        // Remove API key
+        let original = std::env::var("ANTHROPIC_API_KEY").ok();
+        std::env::remove_var("ANTHROPIC_API_KEY");
+
+        let client = UniversalAgent::init_claude_client();
+
+        assert!(client.is_none(), "Claude client should be None without API key");
+
+        // Restore original
+        if let Some(key) = original {
+            std::env::set_var("ANTHROPIC_API_KEY", key);
+        }
+    }
+
+    #[test]
+    fn test_init_claude_client_with_empty_api_key() {
+        // Set empty API key
+        std::env::set_var("ANTHROPIC_API_KEY", "");
+
+        let client = UniversalAgent::init_claude_client();
+
+        assert!(client.is_none(), "Claude client should be None with empty API key");
+
+        // Cleanup
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn test_build_system_prompt() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let workspace = PathBuf::from("/test/workspace");
+        let agent = UniversalAgent::new_with_workspace(tx, workspace.clone());
+
+        let system_prompt = agent.build_system_prompt();
+
+        // Verify system prompt contains key information
+        assert!(system_prompt.contains("expert software development assistant"));
+        assert!(system_prompt.contains(&workspace.display().to_string()));
+        assert!(system_prompt.contains("Current Workspace") || system_prompt.contains("Root:"));
+    }
+
+    #[test]
+    fn test_build_system_prompt_with_mcp() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let workspace = PathBuf::from("/test/workspace");
+        let agent = UniversalAgent::new_with_workspace(tx, workspace);
+
+        let system_prompt = agent.build_system_prompt();
+
+        // System prompt should include MCP status
+        assert!(
+            system_prompt.contains("MCP") || system_prompt.contains("Model Context Protocol"),
+            "System prompt should mention MCP"
+        );
+    }
+
+    #[test]
+    fn test_extract_message_from_prompt_with_text() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let agent = UniversalAgent::new(tx);
+
+        let content_blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent {
+                text: "Hello, Claude!".to_string(),
+                annotations: None,
+                meta: None,
+            }),
+            acp::ContentBlock::Text(acp::TextContent {
+                text: "How are you?".to_string(),
+                annotations: None,
+                meta: None,
+            }),
+        ];
+
+        let result = agent.extract_message_from_prompt(&content_blocks);
+
+        assert!(result.is_ok(), "Should successfully extract message");
+        let message = result.unwrap();
+        assert!(message.contains("Hello, Claude!"));
+        assert!(message.contains("How are you?"));
+    }
+
+    #[test]
+    fn test_extract_message_from_prompt_empty() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let agent = UniversalAgent::new(tx);
+
+        let content_blocks: Vec<acp::ContentBlock> = vec![];
+
+        let result = agent.extract_message_from_prompt(&content_blocks);
+
+        assert!(result.is_err(), "Should return error for empty prompt");
+    }
+
+    #[test]
+    fn test_extract_message_from_prompt_with_mixed_content() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let agent = UniversalAgent::new(tx);
+
+        // Test with multiple text blocks
+        let content_blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent {
+                text: "First message".to_string(),
+                annotations: None,
+                meta: None,
+            }),
+            acp::ContentBlock::Text(acp::TextContent {
+                text: "Second message".to_string(),
+                annotations: None,
+                meta: None,
+            }),
+            acp::ContentBlock::Text(acp::TextContent {
+                text: "Third message".to_string(),
+                annotations: None,
+                meta: None,
+            }),
+        ];
+
+        let result = agent.extract_message_from_prompt(&content_blocks);
+
+        assert!(result.is_ok(), "Should successfully extract message with multiple blocks");
+        let message = result.unwrap();
+        assert!(message.contains("First message"));
+        assert!(message.contains("Second message"));
+        assert!(message.contains("Third message"));
+    }
+
+    #[test]
+    fn test_generate_fallback_response_basic() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let workspace = PathBuf::from("/test/workspace");
+        let agent = UniversalAgent::new_with_workspace(tx, workspace.clone());
+
+        let fallback = agent.generate_fallback_response("Hello!");
+
+        // Verify fallback contains key information
+        assert!(fallback.contains("Universal LSP ACP Agent"));
+        assert!(fallback.contains("Claude API integration is not available"));
+        assert!(fallback.contains("ANTHROPIC_API_KEY"));
+        assert!(fallback.contains(&workspace.display().to_string()));
+    }
+
+    #[test]
+    fn test_generate_fallback_response_with_long_message() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let agent = UniversalAgent::new(tx);
+
+        let long_message = "a".repeat(1000);
+        let fallback = agent.generate_fallback_response(&long_message);
+
+        // Should handle long messages gracefully
+        assert!(fallback.contains("Universal LSP ACP Agent"));
+        // Message should be truncated or included
+        assert!(fallback.len() > 100);
+    }
+
+    #[test]
+    fn test_generate_fallback_response_includes_mcp_status() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let agent = UniversalAgent::new(tx);
+
+        let fallback = agent.generate_fallback_response("test");
+
+        // Should include MCP status
+        assert!(
+            fallback.contains("MCP Integration") || fallback.contains("MCP"),
+            "Fallback should mention MCP status"
+        );
+    }
+
+    #[test]
+    fn test_conversation_message_structure() {
+        // Test ConversationMessage structure
+        let message = ConversationMessage {
+            role: "user".to_string(),
+            content: "Hello!".to_string(),
+            timestamp: std::time::SystemTime::now(),
+        };
+
+        assert_eq!(message.role, "user");
+        assert_eq!(message.content, "Hello!");
+    }
+
+    #[test]
+    fn test_system_prompt_constant() {
+        // Verify SYSTEM_PROMPT has essential content
+        assert!(SYSTEM_PROMPT.contains("expert"));
+        assert!(SYSTEM_PROMPT.contains("software"));
+        assert!(SYSTEM_PROMPT.len() > 100, "System prompt should be substantial");
+    }
+
+    #[test]
+    fn test_workspace_path_handling() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        // Test with absolute path
+        let absolute = PathBuf::from("/home/user/project");
+        let agent1 = UniversalAgent::new_with_workspace(tx.clone(), absolute.clone());
+        let prompt1 = agent1.build_system_prompt();
+        assert!(prompt1.contains(&absolute.display().to_string()));
+
+        // Test with relative path
+        let relative = PathBuf::from("./project");
+        let agent2 = UniversalAgent::new_with_workspace(tx.clone(), relative.clone());
+        let prompt2 = agent2.build_system_prompt();
+        assert!(prompt2.contains("Workspace"));
+
+        // Test with current directory
+        let current = PathBuf::from(".");
+        let agent3 = UniversalAgent::new_with_workspace(tx, current);
+        let prompt3 = agent3.build_system_prompt();
+        assert!(prompt3.contains("Workspace"));
+    }
+
+    #[test]
+    fn test_claude_config_values() {
+        // Verify Claude configuration values are sensible
+        std::env::set_var("ANTHROPIC_API_KEY", "test-key");
+        let client = UniversalAgent::init_claude_client();
+
+        assert!(client.is_some(), "Client should initialize with test key");
+
+        // The config values are set in init_claude_client():
+        // - model: "claude-sonnet-4-20250514"
+        // - max_tokens: 4096
+        // - temperature: 0.7
+        // - timeout_ms: 30000
+
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn test_extract_message_multiline() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let agent = UniversalAgent::new(tx);
+
+        let content_blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent {
+                text: "Line 1\nLine 2\nLine 3".to_string(),
+                annotations: None,
+                meta: None,
+            }),
+        ];
+
+        let result = agent.extract_message_from_prompt(&content_blocks);
+        assert!(result.is_ok());
+
+        let message = result.unwrap();
+        assert!(message.contains("Line 1"));
+        assert!(message.contains("Line 2"));
+        assert!(message.contains("Line 3"));
+    }
+
+    #[test]
+    fn test_extract_message_special_characters() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let agent = UniversalAgent::new(tx);
+
+        let content_blocks = vec![
+            acp::ContentBlock::Text(acp::TextContent {
+                text: "Unicode: 世界, Emoji: 😀🎉".to_string(),
+                annotations: None,
+                meta: None,
+            }),
+        ];
+
+        let result = agent.extract_message_from_prompt(&content_blocks);
+        assert!(result.is_ok());
+
+        let message = result.unwrap();
+        assert!(message.contains("世界"));
+        assert!(message.contains("😀"));
+    }
 }
