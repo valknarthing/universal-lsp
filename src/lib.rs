@@ -326,6 +326,7 @@ pub mod config;
 pub mod coordinator;
 pub mod diagnostics;
 pub mod formatting;
+pub mod inlay_hints;
 pub mod language;
 pub mod mcp;
 pub mod pipeline;

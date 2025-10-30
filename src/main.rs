@@ -21,6 +21,7 @@ mod mcp;
 mod pipeline;
 mod proxy;
 mod semantic_tokens;
+mod inlay_hints;
 mod signature_help;
 mod text_sync;
 mod tree_sitter;
@@ -33,6 +34,7 @@ use config::{Config, CommandMode};
 use coordinator::CoordinatorClient;
 use diagnostics::DiagnosticProvider;
 use formatting::FormattingProvider;
+use inlay_hints::InlayHintsProvider;
 use language::detect_language;
 use mcp::McpRequest;
 use pipeline::{McpPipeline, merge_mcp_responses, lsp_position_to_mcp};
@@ -58,6 +60,7 @@ struct UniversalLsp {
     formatting_provider: Arc<FormattingProvider>,
     semantic_tokens_provider: Arc<SemanticTokensProvider>,
     signature_help_provider: Arc<SignatureHelpProvider>,
+    inlay_hints_provider: Arc<InlayHintsProvider>,
     workspace_manager: Arc<WorkspaceManager>,
     text_sync_manager: Arc<TextSyncManager>,
 }
@@ -153,6 +156,7 @@ impl UniversalLsp {
             formatting_provider: Arc::new(FormattingProvider::new()),
             semantic_tokens_provider: Arc::new(SemanticTokensProvider::new()),
             signature_help_provider: Arc::new(SignatureHelpProvider::new()),
+            inlay_hints_provider: Arc::new(InlayHintsProvider::new()),
             workspace_manager: Arc::new(WorkspaceManager::new()),
             text_sync_manager: Arc::new(TextSyncManager::new()),
         }
@@ -207,6 +211,12 @@ impl LanguageServer for UniversalLsp {
                         }
                     )
                 ),
+                inlay_hint_provider: Some(OneOf::Left(InlayHintServerCapabilities::Options(
+                    InlayHintOptions {
+                        work_done_progress_options: WorkDoneProgressOptions::default(),
+                        resolve_provider: Some(false),
+                    }
+                ))),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -954,6 +964,21 @@ impl LanguageServer for UniversalLsp {
         if let Some(content) = self.documents.get(uri.as_str()) {
             match self.signature_help_provider.get_signature_help(&content, position, lang) {
                 Ok(help) => Ok(help),
+                Err(_) => Ok(None),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let uri = &params.text_document.uri;
+        let range = params.range;
+        let lang = detect_language(uri.path());
+
+        if let Some(content) = self.documents.get(uri.as_str()) {
+            match self.inlay_hints_provider.get_inlay_hints(&content, range, lang) {
+                Ok(hints) => Ok(Some(hints)),
                 Err(_) => Ok(None),
             }
         } else {
